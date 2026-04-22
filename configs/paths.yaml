@@ -1,0 +1,7 @@
+drive_root: /content/drive/MyDrive/dissertation
+raw_data_dir: /content/drive/MyDrive/dissertation/raw
+preprocessed_dir: /content/drive/MyDrive/dissertation/preprocessed
+features_dir: /content/drive/MyDrive/dissertation/features
+results_dir: /content/drive/MyDrive/dissertation/results
+local_cache: /content/cache
+local_scratch: /content/scratch
