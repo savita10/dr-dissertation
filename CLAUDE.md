@@ -34,7 +34,7 @@ Project conventions for the diabetic retinopathy progression prediction disserta
 
 ## Datasets
 
-- **EyePACS** — fundus images only (single modality).
+- **EyePACS** — fundus images only (single modality). Source: HuggingFace dataset `bumbledeep/eyepacs`, saved to Drive in Arrow format and loaded via `datasets.load_from_disk`. Do **not** use `EYEPACS.zip` — the zip path is retained in `configs/paths.yaml` for reference only.
 - **OLIVES** — multimodal (fundus + OCT + clinical).
 
 ## Current Phase: Distribution Validation

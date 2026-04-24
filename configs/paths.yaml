@@ -5,3 +5,9 @@ features_dir: /content/drive/MyDrive/dissertation/features
 results_dir: /content/drive/MyDrive/dissertation/results
 local_cache: /content/cache
 local_scratch: /content/scratch
+
+# EyePACS
+# Primary source: HuggingFace dataset bumbledeep/eyepacs, saved to Drive
+# in HuggingFace Arrow format. Zip path is kept for reference only.
+eyepacs_hf_dir: /content/drive/MyDrive/dissertation/raw/eyepacs_hf
+eyepacs_zip: /content/drive/MyDrive/EYEPACS.zip
