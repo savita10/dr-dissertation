@@ -9,7 +9,9 @@ local_scratch: /content/scratch
 
 # EyePACS — primary source is the HuggingFace dataset bumbledeep/eyepacs,
 # saved to Drive in HuggingFace Arrow format and loaded via load_from_disk.
-eyepacs_hf_dir: /content/drive/MyDrive/dissertation/raw/eyepacs_hf
+# EyePACS HuggingFace dataset is stored at MyDrive root
+# (dataset_info.json and arrow files are directly in MyDrive/)
+eyepacs_hf_dir: /content/drive/MyDrive
 
 # OLIVES — labels are already extracted to Drive; fundus images are
 # extracted on demand from the nested olive.zip archive.
