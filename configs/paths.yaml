@@ -1,3 +1,4 @@
+# ── DIRECTORY PATHS (will be created automatically) ──
 drive_root: /content/drive/MyDrive/dissertation
 raw_data_dir: /content/drive/MyDrive/dissertation/raw
 preprocessed_dir: /content/drive/MyDrive/dissertation/preprocessed
@@ -6,8 +7,19 @@ results_dir: /content/drive/MyDrive/dissertation/results
 local_cache: /content/cache
 local_scratch: /content/scratch
 
-# EyePACS
-# Primary source: HuggingFace dataset bumbledeep/eyepacs, saved to Drive
-# in HuggingFace Arrow format. Zip path is kept for reference only.
+# EyePACS — primary source is the HuggingFace dataset bumbledeep/eyepacs,
+# saved to Drive in HuggingFace Arrow format and loaded via load_from_disk.
 eyepacs_hf_dir: /content/drive/MyDrive/dissertation/raw/eyepacs_hf
+
+# OLIVES — labels are already extracted to Drive; fundus images are
+# extracted on demand from the nested olive.zip archive.
+olives_labels_dir: /content/drive/MyDrive/olives_labels/
+olives_extracted_dir: /content/drive/MyDrive/dissertation/raw/olives_extracted/
+
+# ── FILE PATHS (not directories — do not mkdir) ──
+# Legacy zip kept for reference only; loaders use eyepacs_hf_dir above.
 eyepacs_zip: /content/drive/MyDrive/EYEPACS.zip
+
+# olive.zip wraps OLIVES.zip, which contains TREX_DME.zip and Prime_FULL.zip.
+olive_zip: /content/drive/MyDrive/olive.zip
+olives_labels_csv: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/ml_centric_labels/Biomarker_Clinical_Data_Images.csv
