@@ -14,18 +14,18 @@ venv/
 env/
 
 # PyTorch
-*.pt
-*.pth
 checkpoints/
 
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# Data
-data/
+# Data — ignore large tensor/array files but NOT Python source files
+/data/
 *.npy
 *.csv
+*.pt
+*.pth
 
 # Wandb
 wandb/
