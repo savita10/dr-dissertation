@@ -2,4 +2,11 @@ image_size: 224
 normalise_mean: [0.485, 0.456, 0.406]
 normalise_std: [0.229, 0.224, 0.225]
 eyepacs_shard_size: 5000
-scratch_dir: /content/scratch
+
+eyepacs_source: /content/drive/MyDrive/dissertation/raw/eyepacs_hf
+eyepacs_output: /content/drive/MyDrive/dissertation/preprocessed/eyepacs
+
+olives_zip: /content/drive/MyDrive/olive.zip
+olives_labels_csv: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/ml_centric_labels/Biomarker_Clinical_Data_Images.csv
+olives_output: /content/drive/MyDrive/dissertation/preprocessed/olives
+scratch_dir: /content/scratch/olives_fundus
