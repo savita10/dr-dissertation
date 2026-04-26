@@ -16,18 +16,14 @@ from omegaconf import DictConfig
 from PIL import Image
 from tqdm.auto import tqdm
 
-from src.data.olives_loader import (
-    BIOMARKER_COLUMNS,
-    FUNDUS_TOKEN,
-    PATH_COLUMN,
-    iter_trial_zips,
-)
+from src.data.olives_loader import BIOMARKER_COLUMNS, PATH_COLUMN
 from src.utils.config import load_config
 
 EYEPACS_SHARD_PREFIX = "eyepacs_shard"
 OLIVES_OUTPUT_FILENAME = "olives_fundus.pt"
 METADATA_FILENAME = "metadata.json"
 DR_LABEL_COLUMN = "DRIL"
+FUNDUS_TOKEN = "fundus"
 SECTION_BAR = "=" * 72
 
 
@@ -176,25 +172,77 @@ def preprocess_eyepacs(cfg: DictConfig) -> None:
     print(f"output: {output_dir}")
 
 
-def _extract_fundus_to_scratch(olive_zip_path: str, dest_dir: Path) -> None:
-    extracted = 0
-    skipped = 0
-    for trial_name, trial_zf in iter_trial_zips(olive_zip_path):
-        members = [
-            m
-            for m in trial_zf.namelist()
-            if not m.endswith("/") and FUNDUS_TOKEN in Path(m).name.lower()
-        ]
-        for member in tqdm(members, desc=f"extract {trial_name}"):
-            target = dest_dir / member
-            if target.exists() and target.stat().st_size > 0:
-                skipped += 1
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with trial_zf.open(member) as src, open(target, "wb") as dst:
-                dst.write(src.read())
-            extracted += 1
-    print(f"extracted={extracted}, skipped={skipped}")
+def _extract_fundus_to_scratch(
+    olives_zip_path: str, scratch_dir: Path
+) -> None:
+    """
+    Extract fundus images from triple-nested zip structure:
+    olive.zip → OLIVES.zip → TREX_DME.zip and Prime_FULL.zip
+
+    Only files with 'fundus' in the filename are extracted.
+    Preserves the internal folder structure so paths can be
+    matched against the CSV Path column.
+
+    Structure inside olive.zip:
+      OLIVES.zip
+        └── OLIVES/
+              ├── TREX_DME.zip
+              └── Prime_FULL.zip
+
+    Each inner zip contains fundus images named:
+      TREX DME: TREX DME/{site}/{patient}/V{visit}/{eye}/
+                fundus_{eye}_V{visit}.tif
+      Prime:    Prime_FULL/{patient}/W{week}/{eye}/
+                fundus_{eye}_W{week}.tif
+    """
+    import zipfile
+
+    inner_zips = ["OLIVES/TREX_DME.zip", "OLIVES/Prime_FULL.zip"]
+
+    print(f"  Opening outer zip: {olives_zip_path}")
+    with zipfile.ZipFile(olives_zip_path, "r") as outer:
+
+        # Open OLIVES.zip as a stream (second level)
+        print("  Opening OLIVES.zip as stream...")
+        with outer.open("OLIVES.zip") as olives_stream:
+            with zipfile.ZipFile(olives_stream, "r") as olives_zip:
+
+                for inner_zip_name in inner_zips:
+                    trial = (
+                        "TREX_DME"
+                        if "TREX" in inner_zip_name
+                        else "Prime_FULL"
+                    )
+                    print(f"  Processing {inner_zip_name}...")
+
+                    with olives_zip.open(inner_zip_name) as inner_stream:
+                        with zipfile.ZipFile(inner_stream, "r") as inner_zip:
+
+                            # Find all fundus files
+                            fundus_files = [
+                                f
+                                for f in inner_zip.namelist()
+                                if FUNDUS_TOKEN in f.lower()
+                                and not f.endswith("/")
+                            ]
+                            print(
+                                f"    Found {len(fundus_files)} "
+                                f"fundus files in {trial}"
+                            )
+
+                            # Extract each fundus file preserving
+                            # folder structure
+                            for file_path in tqdm(
+                                fundus_files, desc=f"Extracting {trial}"
+                            ):
+                                target = scratch_dir / file_path
+                                target.parent.mkdir(
+                                    parents=True, exist_ok=True
+                                )
+                                if target.exists():
+                                    continue  # resumable
+                                with inner_zip.open(file_path) as src:
+                                    target.write_bytes(src.read())
 
 
 def _parse_olives_metadata(rel_path: str) -> dict[str, str]:
