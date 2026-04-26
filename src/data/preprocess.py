@@ -91,8 +91,46 @@ def _write_metadata(
         json.dump(metadata, f, indent=2)
 
 
-def _normalise_csv_path(value: Any) -> str:
-    return str(value).lstrip("/").replace("\\", "/").strip()
+def _csv_path_to_key(
+    csv_path: str,
+) -> tuple[str, str, str, str] | None:
+    """
+    Extract (trial, patient, visit, eye) from a CSV Path entry.
+
+    CSV format has a leading slash:
+      /Prime_FULL/patient/visit/eye/filename.tif → parts[1, 2, 3, 4]
+      /TREX DME/arm/patient/visit/eye/filename.tif → parts[1, 3, 4, 5]
+    """
+    parts = str(csv_path).split("/")
+    if len(parts) < 2:
+        return None
+    trial = parts[1]
+    if trial == "Prime_FULL" and len(parts) >= 5:
+        return (trial, parts[2], parts[3], parts[4])
+    if trial == "TREX DME" and len(parts) >= 6:
+        return (trial, parts[3], parts[4], parts[5])
+    return None
+
+
+def _disk_path_to_key(
+    rel_path: str,
+) -> tuple[str, str, str, str] | None:
+    """
+    Extract (trial, patient, visit, eye) from a scratch-relative fundus path.
+
+    Disk format has no leading slash:
+      Prime_FULL/patient/visit/eye/fundus_*.tif → parts[0, 1, 2, 3]
+      TREX DME/arm/patient/visit/eye/fundus_*.tif → parts[0, 2, 3, 4]
+    """
+    parts = rel_path.split("/")
+    if not parts:
+        return None
+    trial = parts[0]
+    if trial == "Prime_FULL" and len(parts) >= 4:
+        return (trial, parts[1], parts[2], parts[3])
+    if trial == "TREX DME" and len(parts) >= 5:
+        return (trial, parts[2], parts[3], parts[4])
+    return None
 
 
 def _resolve_eyepacs_split(dataset: Dataset | DatasetDict) -> Dataset:
@@ -325,14 +363,15 @@ def preprocess_olives(cfg: DictConfig) -> None:
     _stage(f"2/5 Loading labels from {cfg.olives_labels_csv}")
     t0 = time.time()
     labels_df = pd.read_csv(str(cfg.olives_labels_csv))
-    labels_df["_normalised_path"] = labels_df[PATH_COLUMN].map(_normalise_csv_path)
-    csv_lookup = {
-        path: idx
-        for idx, path in enumerate(labels_df["_normalised_path"])
-        if FUNDUS_TOKEN in path.lower()
-    }
+
+    csv_lookup: dict[tuple[str, str, str, str], list[int]] = {}
+    for idx, csv_path in enumerate(labels_df[PATH_COLUMN]):
+        key = _csv_path_to_key(str(csv_path))
+        if key is not None:
+            csv_lookup.setdefault(key, []).append(idx)
     print(
-        f"loaded {len(labels_df)} rows ({len(csv_lookup)} fundus rows) "
+        f"loaded {len(labels_df)} rows, "
+        f"{len(csv_lookup)} unique (trial, patient, visit, eye) keys "
         f"in {time.time() - t0:.1f}s"
     )
 
@@ -358,11 +397,15 @@ def preprocess_olives(cfg: DictConfig) -> None:
     t0 = time.time()
     for path in tqdm(fundus_files, desc="OLIVES preprocess"):
         rel_path = path.relative_to(scratch_dir).as_posix()
-        normalised = _normalise_csv_path(rel_path)
-        row_idx = csv_lookup.get(normalised)
-        if row_idx is None:
+        key = _disk_path_to_key(rel_path)
+        if key is None:
             unmatched += 1
             continue
+        indices = csv_lookup.get(key)
+        if not indices:
+            unmatched += 1
+            continue
+        row_idx = indices[0]
         try:
             with Image.open(path) as img:
                 tensor = transform(img)
