@@ -3,9 +3,10 @@ normalise_mean: [0.485, 0.456, 0.406]
 normalise_std: [0.229, 0.224, 0.225]
 eyepacs_shard_size: 5000
 
-# EyePACS HuggingFace dataset is stored at MyDrive root
-# (dataset_info.json and arrow files are directly in MyDrive/)
-eyepacs_source: /content/drive/MyDrive
+# EyePACS source — local SSD copy (faster than reading from Drive)
+# Original dataset lives at /content/drive/MyDrive
+# Copy to local SSD at start of each Colab session before preprocessing
+eyepacs_source: /content/eyepacs_hf
 eyepacs_output: /content/drive/MyDrive/dissertation/preprocessed/eyepacs
 
 olives_zip: /content/drive/MyDrive/olive.zip
