@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 INNER_OLIVES_ZIP_NAME = "OLIVES.zip"
 TRIAL_ZIP_NAMES = ("TREX_DME.zip", "Prime_FULL.zip")
 FUNDUS_TOKEN = "fundus"
-PATH_COLUMN = "Path"
+PATH_COLUMN = "Path (Trial/Arm/Folder/Visit/Eye/Image Name)"
 BIOMARKER_COLUMNS = (
     "Atrophy / thinning of retinal layers",
     "Disruption of EZ",

@@ -16,7 +16,6 @@ from omegaconf import DictConfig
 from PIL import Image
 from tqdm.auto import tqdm
 
-from src.data.olives_loader import BIOMARKER_COLUMNS, PATH_COLUMN
 from src.utils.config import load_config
 
 EYEPACS_SHARD_PREFIX = "eyepacs_shard"
@@ -24,6 +23,25 @@ OLIVES_OUTPUT_FILENAME = "olives_fundus.pt"
 METADATA_FILENAME = "metadata.json"
 DR_LABEL_COLUMN = "DRIL"
 FUNDUS_TOKEN = "fundus"
+PATH_COLUMN = "Path (Trial/Arm/Folder/Visit/Eye/Image Name)"
+BIOMARKER_COLUMNS = (
+    "Atrophy / thinning of retinal layers",
+    "Disruption of EZ",
+    "DRIL",
+    "IR hemorrhages",
+    "IR HRF",
+    "Partially attached vitreous face",
+    "Fully attached vitreous face",
+    "Preretinal tissue/hemorrhage",
+    "Vitreous debris",
+    "VMT",
+    "DRT/ME",
+    "Fluid (IRF)",
+    "Fluid (SRF)",
+    "Disruption of RPE",
+    "PED (serous)",
+    "SHRM",
+)
 SECTION_BAR = "=" * 72
 
 
