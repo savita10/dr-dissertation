@@ -42,6 +42,7 @@ BIOMARKER_COLUMNS = (
     "PED (serous)",
     "SHRM",
 )
+DRIL_INDEX = BIOMARKER_COLUMNS.index(DR_LABEL_COLUMN)
 SECTION_BAR = "=" * 72
 
 
@@ -336,7 +337,76 @@ def _safe_float(value: Any) -> float:
         return float("nan")
 
 
+def _to_long_or_missing(value: Any) -> int:
+    """Cast value to int; return -1 for None/NaN/non-numeric (e.g. string IDs)."""
+    if value is None:
+        return -1
+    if isinstance(value, float) and np.isnan(value):
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _build_clinical_lookup(
+    xlsx_path: str,
+) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+    """Tier-1 lookup: BCVA/CST/Patient_ID/Eye_ID per (trial, patient, visit, eye)."""
+    df = pd.read_excel(xlsx_path)
+    if PATH_COLUMN not in df.columns:
+        raise KeyError(
+            f"Expected column {PATH_COLUMN!r} in {xlsx_path}. "
+            f"Found: {list(df.columns)}"
+        )
+    df = df.assign(_key=df[PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p))))
+    df = df[df["_key"].notna()].drop_duplicates(subset="_key")
+    lookup: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        lookup[row["_key"]] = {
+            "BCVA": row.get("BCVA"),
+            "CST": row.get("CST"),
+            "Patient_ID": row.get("Patient_ID"),
+            "Eye_ID": row.get("Eye_ID"),
+        }
+    return lookup
+
+
+def _build_biomarker_lookup(
+    csv_path: str,
+) -> dict[tuple[str, str, str, str], np.ndarray]:
+    """Tier-2 lookup: 16-element float32 biomarker vector per visit-eye key."""
+    df = pd.read_csv(csv_path)
+    if PATH_COLUMN not in df.columns:
+        raise KeyError(
+            f"Expected column {PATH_COLUMN!r} in {csv_path}. "
+            f"Found: {list(df.columns)}"
+        )
+    df = df.assign(_key=df[PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p))))
+    df = df[df["_key"].notna()].drop_duplicates(subset="_key")
+    lookup: dict[tuple[str, str, str, str], np.ndarray] = {}
+    for _, row in df.iterrows():
+        vec = np.array(
+            [_safe_float(row.get(c, float("nan"))) for c in BIOMARKER_COLUMNS],
+            dtype=np.float32,
+        )
+        lookup[row["_key"]] = vec
+    return lookup
+
+
 def preprocess_olives(cfg: DictConfig) -> None:
+    """
+    Three-tier label assignment for OLIVES fundus images.
+
+    Tier 0 — fundus image only (no clinical, no biomarker labels).
+    Tier 1 — fundus + clinical (BCVA, CST, Patient_ID, Eye_ID).
+    Tier 2 — fundus + clinical + 16 biomarker labels.
+
+    All fundus files on disk are retained regardless of label availability;
+    has_clinical and has_biomarkers masks indicate which labels are present
+    per sample. NaN values in tensors mark missing labels and must be masked
+    by downstream losses.
+    """
     _section("OLIVES preprocessing")
 
     output_dir = Path(str(cfg.olives_output))
@@ -347,6 +417,14 @@ def preprocess_olives(cfg: DictConfig) -> None:
         print(f"output {output_path} already exists — skipping")
         return
 
+    xlsx_path = cfg.get("olives_clinical_xlsx", None)
+    if not xlsx_path:
+        raise ValueError(
+            "preprocess.yaml is missing required key 'olives_clinical_xlsx' — "
+            "this should point to Clinical_Data_Images.xlsx (tier-1 BCVA/CST "
+            "labels). See configs/preprocess.yaml for the expected format."
+        )
+
     image_size = int(cfg.image_size)
     mean = list(cfg.normalise_mean)
     std = list(cfg.normalise_std)
@@ -355,27 +433,28 @@ def preprocess_olives(cfg: DictConfig) -> None:
     scratch_dir = Path(str(cfg.scratch_dir))
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    _stage(f"1/5 Extracting fundus images to {scratch_dir}")
+    _stage(f"1/6 Extracting fundus images to {scratch_dir}")
     t0 = time.time()
     _extract_fundus_to_scratch(str(cfg.olives_zip), scratch_dir)
     print(f"extraction complete in {time.time() - t0:.1f}s")
 
-    _stage(f"2/5 Loading labels from {cfg.olives_labels_csv}")
+    _stage(f"2/6 Loading biomarker labels from {cfg.olives_labels_csv}")
     t0 = time.time()
-    labels_df = pd.read_csv(str(cfg.olives_labels_csv))
-
-    csv_lookup: dict[tuple[str, str, str, str], list[int]] = {}
-    for idx, csv_path in enumerate(labels_df[PATH_COLUMN]):
-        key = _csv_path_to_key(str(csv_path))
-        if key is not None:
-            csv_lookup.setdefault(key, []).append(idx)
+    biomarker_lookup = _build_biomarker_lookup(str(cfg.olives_labels_csv))
     print(
-        f"loaded {len(labels_df)} rows, "
-        f"{len(csv_lookup)} unique (trial, patient, visit, eye) keys "
-        f"in {time.time() - t0:.1f}s"
+        f"Biomarker lookup: {len(biomarker_lookup)} keys "
+        f"(loaded in {time.time() - t0:.1f}s)"
     )
 
-    _stage("3/5 Walking scratch dir for fundus files")
+    _stage(f"3/6 Loading clinical labels from {xlsx_path}")
+    t0 = time.time()
+    clinical_lookup = _build_clinical_lookup(str(xlsx_path))
+    print(
+        f"Clinical lookup: {len(clinical_lookup)} keys "
+        f"(loaded in {time.time() - t0:.1f}s)"
+    )
+
+    _stage("4/6 Walking scratch dir for fundus files")
     fundus_files = [
         p
         for p in scratch_dir.rglob("*")
@@ -383,29 +462,30 @@ def preprocess_olives(cfg: DictConfig) -> None:
     ]
     print(f"found {len(fundus_files)} fundus files on disk")
 
-    _stage("4/5 Preprocessing matched images")
+    _stage("5/6 Preprocessing all fundus images with three-tier label assignment")
     images_list: list[torch.Tensor] = []
     labels_list: list[int] = []
     metadata_list: list[dict[str, str]] = []
     biomarkers_list: list[list[float]] = []
     bcva_list: list[float] = []
     cst_list: list[float] = []
+    has_clinical_list: list[bool] = []
+    has_biomarkers_list: list[bool] = []
+    patient_ids_list: list[int] = []
+    eye_ids_list: list[int] = []
+    keys_list: list[tuple[str, str, str, str]] = []
     label_counter: Counter = Counter()
-    unmatched = 0
+    n_with_clinical = 0
+    n_with_biomarkers = 0
     failed = 0
+
+    nan_biomarkers = [float("nan")] * len(BIOMARKER_COLUMNS)
 
     t0 = time.time()
     for path in tqdm(fundus_files, desc="OLIVES preprocess"):
         rel_path = path.relative_to(scratch_dir).as_posix()
         key = _disk_path_to_key(rel_path)
-        if key is None:
-            unmatched += 1
-            continue
-        indices = csv_lookup.get(key)
-        if not indices:
-            unmatched += 1
-            continue
-        row_idx = indices[0]
+
         try:
             with Image.open(path) as img:
                 tensor = transform(img)
@@ -414,39 +494,86 @@ def preprocess_olives(cfg: DictConfig) -> None:
             print(f"  failed to load {path}: {exc}")
             continue
 
-        row = labels_df.iloc[row_idx]
         meta = _parse_olives_metadata(rel_path)
-        label = _safe_int(row.get(DR_LABEL_COLUMN, 0))
-        biomarkers = [_safe_float(row.get(c, float("nan"))) for c in BIOMARKER_COLUMNS]
+
+        clinical = clinical_lookup.get(key) if key is not None else None
+        if clinical is not None:
+            bcva = _safe_float(clinical.get("BCVA"))
+            cst = _safe_float(clinical.get("CST"))
+            patient_id = _to_long_or_missing(clinical.get("Patient_ID"))
+            eye_id = _to_long_or_missing(clinical.get("Eye_ID"))
+            has_clinical = True
+            n_with_clinical += 1
+        else:
+            bcva = float("nan")
+            cst = float("nan")
+            patient_id = -1
+            eye_id = -1
+            has_clinical = False
+
+        biomarker_vec = biomarker_lookup.get(key) if key is not None else None
+        if biomarker_vec is not None:
+            biomarkers = biomarker_vec.tolist()
+            label = _safe_int(biomarker_vec[DRIL_INDEX])
+            has_biomarkers = True
+            n_with_biomarkers += 1
+            label_counter[label] += 1
+        else:
+            biomarkers = list(nan_biomarkers)
+            label = 0
+            has_biomarkers = False
 
         images_list.append(tensor)
         labels_list.append(label)
         metadata_list.append(meta)
         biomarkers_list.append(biomarkers)
-        bcva_list.append(_safe_float(row.get("BCVA", float("nan"))))
-        cst_list.append(_safe_float(row.get("CST", float("nan"))))
-        label_counter[label] += 1
+        bcva_list.append(bcva)
+        cst_list.append(cst)
+        has_clinical_list.append(has_clinical)
+        has_biomarkers_list.append(has_biomarkers)
+        patient_ids_list.append(patient_id)
+        eye_ids_list.append(eye_id)
+        keys_list.append(key if key is not None else ("", "", "", ""))
 
-    n_processed = len(images_list)
+    n_total = len(images_list)
+    pct_clin = n_with_clinical / n_total if n_total else 0.0
+    pct_bio = n_with_biomarkers / n_total if n_total else 0.0
     print(
-        f"processed={n_processed}, unmatched={unmatched}, failed={failed} "
-        f"in {time.time() - t0:.1f}s"
+        f"\n=== OLIVES label coverage ===\n"
+        f"  Total fundus images:         {n_total}\n"
+        f"  With clinical (BCVA/CST):    {n_with_clinical} ({pct_clin:.1%})\n"
+        f"  With biomarkers (16 labels): {n_with_biomarkers} ({pct_bio:.1%})\n"
+        f"  Clinical-only (no biomarker):"
+        f" {n_with_clinical - n_with_biomarkers}\n"
+        f"  Failed to load:              {failed}"
     )
-    if n_processed == 0:
+    print(f"stage 5/6 complete in {time.time() - t0:.1f}s")
+
+    if n_total == 0:
         raise RuntimeError(
-            "No OLIVES fundus images were processed — check that "
-            f"olives_labels_csv Path column matches files under {scratch_dir}"
+            f"No fundus images were processed — found "
+            f"{len(fundus_files)} files on disk, all failed to load."
         )
 
-    _stage("5/5 Saving tensor file and metadata.json")
+    _stage("6/6 Saving tensor file and metadata.json")
     t0 = time.time()
     images = torch.stack(images_list)
     labels = torch.tensor(labels_list, dtype=torch.long)
     biomarkers_t = torch.tensor(biomarkers_list, dtype=torch.float32)
     bcva_t = torch.tensor(bcva_list, dtype=torch.float32)
     cst_t = torch.tensor(cst_list, dtype=torch.float32)
+    has_clinical_t = torch.tensor(has_clinical_list, dtype=torch.bool)
+    has_biomarkers_t = torch.tensor(has_biomarkers_list, dtype=torch.bool)
+    patient_ids_t = torch.tensor(patient_ids_list, dtype=torch.long)
+    eye_ids_t = torch.tensor(eye_ids_list, dtype=torch.long)
 
     tmp_path = output_path.with_suffix(".pt.tmp")
+    # NOTE on `labels`: this is the binary DRIL biomarker flag (one of the 16
+    # biomarker columns), NOT a multi-class DR severity grade. Values are
+    # 0 / 1 where biomarkers are present and 0 where they are not. Downstream
+    # classification losses MUST mask by `has_biomarkers` before computing
+    # loss — samples with has_biomarkers=False have label=0 by default and
+    # would otherwise pollute the negative class.
     torch.save(
         {
             "images": images,
@@ -455,19 +582,53 @@ def preprocess_olives(cfg: DictConfig) -> None:
             "biomarkers": biomarkers_t,
             "bcva": bcva_t,
             "cst": cst_t,
+            "has_clinical": has_clinical_t,
+            "has_biomarkers": has_biomarkers_t,
+            "patient_ids": patient_ids_t,
+            "eye_ids": eye_ids_t,
+            "keys": keys_list,
         },
         tmp_path,
     )
     tmp_path.replace(output_path)
+
+    n_unlabelled = n_total - n_with_biomarkers
+    class_distribution: dict[str, int] = {
+        str(k): int(v) for k, v in sorted(label_counter.items())
+    }
+    class_distribution["unlabelled"] = n_unlabelled
+
     _write_metadata(
         output_dir,
-        total_images=n_processed,
+        total_images=n_total,
         num_shards=1,
         image_size=image_size,
         mean=mean,
         std=std,
-        class_distribution={str(k): int(v) for k, v in sorted(label_counter.items())},
+        class_distribution=class_distribution,
     )
+
+    metadata_path = output_dir / METADATA_FILENAME
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+    metadata["olives_label_coverage"] = {
+        "total_fundus": n_total,
+        "with_clinical_labels": n_with_clinical,
+        "with_biomarker_labels": n_with_biomarkers,
+        "clinical_keys_in_lookup": len(clinical_lookup),
+        "biomarker_keys_in_lookup": len(biomarker_lookup),
+        "labels_field_semantic": (
+            "Binary DRIL biomarker flag (one of the 16 biomarker columns), "
+            "NOT multi-class DR severity. Samples with has_biomarkers=False "
+            "have label=0 by default; downstream classification losses must "
+            "mask by has_biomarkers before computing loss. class_distribution "
+            "above only reflects samples where has_biomarkers=True, plus an "
+            "'unlabelled' bucket for the rest."
+        ),
+    }
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
     print(f"saved in {time.time() - t0:.1f}s — output: {output_path}")
 
 

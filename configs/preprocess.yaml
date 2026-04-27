@@ -10,6 +10,10 @@ eyepacs_source: /content/eyepacs_hf
 eyepacs_output: /content/drive/MyDrive/dissertation/preprocessed/eyepacs
 
 olives_zip: /content/drive/MyDrive/olive.zip
+# OLIVES tier-2 (16-biomarker) labels — ~192 visit-eye keys
 olives_labels_csv: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/ml_centric_labels/Biomarker_Clinical_Data_Images.csv
+# OLIVES tier-1 (BCVA/CST/Patient_ID/Eye_ID) labels — ~1,594 visit-eye keys
+# Required for OLIVES preprocessing; preprocess_olives errors out if missing.
+olives_clinical_xlsx: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/full_labels/Clinical_Data_Images.xlsx
 olives_output: /content/drive/MyDrive/dissertation/preprocessed/olives
 scratch_dir: /content/scratch/olives_fundus
