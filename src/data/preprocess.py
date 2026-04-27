@@ -3,7 +3,7 @@ import json
 import sys
 import time
 import traceback
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -482,6 +482,28 @@ def preprocess_olives(cfg: DictConfig) -> None:
         if p.is_file() and FUNDUS_TOKEN in p.name.lower()
     ]
     print(f"found {len(fundus_files)} fundus files on disk")
+
+    # Dedupe Prime_FULL fundus files where both .tif and .png exist for the
+    # same visit-eye. Prefer .tif (lossless) over .png so all four trial-wise
+    # branches yield consistent format with TREX DME (.tif only).
+    by_key: dict[
+        tuple[str, str, str, str] | None, list[Path]
+    ] = defaultdict(list)
+    for fundus_path in fundus_files:
+        rel = fundus_path.relative_to(scratch_dir).as_posix()
+        by_key[_disk_path_to_key(rel)].append(fundus_path)
+
+    deduped: list[Path] = []
+    for paths in by_key.values():
+        if len(paths) == 1:
+            deduped.append(paths[0])
+            continue
+        tif_paths = [p for p in paths if p.suffix.lower() == ".tif"]
+        deduped.append(tif_paths[0] if tif_paths else paths[0])
+
+    n_deduped = len(fundus_files) - len(deduped)
+    print(f"  deduped {n_deduped} duplicate Prime_FULL .tif/.png pairs")
+    fundus_files = deduped
 
     _stage("5/6 Preprocessing all fundus images with three-tier label assignment")
     images_list: list[torch.Tensor] = []
