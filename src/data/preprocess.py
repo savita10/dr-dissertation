@@ -368,6 +368,10 @@ def _build_clinical_lookup(
     df = df.assign(
         _key=df[CLINICAL_PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p)))
     )
+    # BCVA/CST/Patient_ID/Eye_ID are visit-level measurements broadcast to
+    # all ~49 OCT scan rows for the same visit-eye (verified to have zero
+    # intra-visit variation). drop_duplicates(keep='first') is therefore
+    # correct here — every row for a given _key carries identical values.
     df = df[df["_key"].notna()].drop_duplicates(subset="_key")
     lookup: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for _, row in df.iterrows():
@@ -391,14 +395,23 @@ def _build_biomarker_lookup(
             f"Found: {list(df.columns)}"
         )
     df = df.assign(_key=df[PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p))))
-    df = df[df["_key"].notna()].drop_duplicates(subset="_key")
+    df = df[df["_key"].notna()].copy()
+
+    # Aggregate per visit-eye: max across OCT scans for each biomarker.
+    # Biomarkers are per-scan annotations; a visit-eye is positive for a
+    # biomarker if any of its ~49 OCT scans showed it. drop_duplicates
+    # would silently lose positives that only appear on later scans
+    # (e.g. ~233 → 0 for some biomarkers in earlier diagnostics).
+    biomarker_cols = list(BIOMARKER_COLUMNS)
+    agg = df.groupby("_key")[biomarker_cols].max()
+
     lookup: dict[tuple[str, str, str, str], np.ndarray] = {}
-    for _, row in df.iterrows():
+    for key, row in agg.iterrows():
         vec = np.array(
             [_safe_float(row.get(c, float("nan"))) for c in BIOMARKER_COLUMNS],
             dtype=np.float32,
         )
-        lookup[row["_key"]] = vec
+        lookup[key] = vec
     return lookup
 
 
