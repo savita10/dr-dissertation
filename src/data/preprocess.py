@@ -24,6 +24,12 @@ METADATA_FILENAME = "metadata.json"
 DR_LABEL_COLUMN = "DRIL"
 FUNDUS_TOKEN = "fundus"
 PATH_COLUMN = "Path (Trial/Arm/Folder/Visit/Eye/Image Name)"
+# Clinical_Data_Images.xlsx uses a different path-column header than the
+# biomarker CSV. The path-format itself is identical (leading slash, same
+# Trial/.../patient/visit/eye/file.tif structure) — first row example:
+#   /Prime_FULL/02-010/W0/OD/15.tif
+# so _csv_path_to_key works unchanged on both files.
+CLINICAL_PATH_COLUMN = "File_Path"
 BIOMARKER_COLUMNS = (
     "Atrophy / thinning of retinal layers",
     "Disruption of EZ",
@@ -354,12 +360,14 @@ def _build_clinical_lookup(
 ) -> dict[tuple[str, str, str, str], dict[str, Any]]:
     """Tier-1 lookup: BCVA/CST/Patient_ID/Eye_ID per (trial, patient, visit, eye)."""
     df = pd.read_excel(xlsx_path)
-    if PATH_COLUMN not in df.columns:
+    if CLINICAL_PATH_COLUMN not in df.columns:
         raise KeyError(
-            f"Expected column {PATH_COLUMN!r} in {xlsx_path}. "
+            f"Expected column {CLINICAL_PATH_COLUMN!r} in {xlsx_path}. "
             f"Found: {list(df.columns)}"
         )
-    df = df.assign(_key=df[PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p))))
+    df = df.assign(
+        _key=df[CLINICAL_PATH_COLUMN].map(lambda p: _csv_path_to_key(str(p)))
+    )
     df = df[df["_key"].notna()].drop_duplicates(subset="_key")
     lookup: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for _, row in df.iterrows():
