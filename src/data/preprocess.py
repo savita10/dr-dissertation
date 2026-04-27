@@ -481,29 +481,43 @@ def preprocess_olives(cfg: DictConfig) -> None:
         for p in scratch_dir.rglob("*")
         if p.is_file() and FUNDUS_TOKEN in p.name.lower()
     ]
-    print(f"found {len(fundus_files)} fundus files on disk")
+    n_pre_dedup = len(fundus_files)
 
-    # Dedupe Prime_FULL fundus files where both .tif and .png exist for the
-    # same visit-eye. Prefer .tif (lossless) over .png so all four trial-wise
-    # branches yield consistent format with TREX DME (.tif only).
-    by_key: dict[
-        tuple[str, str, str, str] | None, list[Path]
-    ] = defaultdict(list)
+    # Dedupe .tif/.png pairs for the same visit-eye. Prime_FULL stores both
+    # formats for some visit-eyes; we keep .tif (lossless) and drop .png so
+    # output format is consistent with TREX DME (.tif only). Paths that
+    # don't parse to a visit-eye key are kept under unique buckets so they
+    # are never merged.
+    by_key: dict[Any, list[Path]] = defaultdict(list)
     for fundus_path in fundus_files:
         rel = fundus_path.relative_to(scratch_dir).as_posix()
-        by_key[_disk_path_to_key(rel)].append(fundus_path)
+        key = _disk_path_to_key(rel)
+        if key is not None:
+            by_key[key].append(fundus_path)
+        else:
+            by_key[(None, fundus_path)].append(fundus_path)
 
     deduped: list[Path] = []
+    n_dropped = 0
     for paths in by_key.values():
         if len(paths) == 1:
             deduped.append(paths[0])
             continue
-        tif_paths = [p for p in paths if p.suffix.lower() == ".tif"]
+        tif_paths = [
+            p for p in paths if p.suffix.lower() in (".tif", ".tiff")
+        ]
         deduped.append(tif_paths[0] if tif_paths else paths[0])
+        n_dropped += len(paths) - 1
 
-    n_deduped = len(fundus_files) - len(deduped)
-    print(f"  deduped {n_deduped} duplicate Prime_FULL .tif/.png pairs")
     fundus_files = deduped
+    print(
+        f"found {n_pre_dedup} fundus files on disk; "
+        f"after dedup: {len(fundus_files)} unique fundus images"
+    )
+    print(
+        f"  deduped {n_dropped} duplicate fundus file(s) "
+        f"(.tif preferred over .png)"
+    )
 
     _stage("5/6 Preprocessing all fundus images with three-tier label assignment")
     images_list: list[torch.Tensor] = []
