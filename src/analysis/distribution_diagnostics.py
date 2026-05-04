@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 from scipy.linalg import sqrtm
+from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import cosine_similarity, rbf_kernel
 from tqdm.auto import tqdm
@@ -25,11 +26,35 @@ from src.utils.config import load_config
 
 EYEPACS_FEATURES_FILENAME = "eyepacs_resnet50_features.pt"
 OLIVES_FEATURES_FILENAME = "olives_resnet50_features.pt"
+OLIVES_INPUT_FILENAME = "olives_fundus.pt"
+EYEPACS_SHARD_GLOB = "eyepacs_shard_*.pt"
 PHASE1_DIRNAME = "phase1"
 PCA_PLOT_FILENAME = "pca_eyepacs_vs_olives.png"
+SEVERITY_PLOT_FILENAME = "pca_by_severity.png"
+IMAGE_STATS_PLOT_FILENAME = "image_stats_vs_pc1.png"
 REPORT_FILENAME = "phase1_report.md"
 COSINE_CHUNK_SIZE = 500
 MMD_RNG_SEED = 42
+SEVERITY_RNG_SEED = 42
+N_DR_CLASSES = 5
+EYEPACS_LABEL_NAMES = (
+    "No DR",
+    "Mild",
+    "Moderate",
+    "Severe",
+    "Proliferative DR",
+)
+# In ImageNet-normalised space, R-channel < -1.5 corresponds to a near-black
+# pixel in raw RGB (≈0.14 raw); used as a proxy for fundus field-stop borders.
+BLACK_PIXEL_THRESHOLD = -1.5
+IMAGE_STATS_CHUNK = 256
+EYEPACS_STATS_SUBSAMPLE = 2000
+SHIFT_SPREAD_RATIO = 0.30
+STAT_LABELS = {
+    "brightness": "mean intensity",
+    "black_pixel": "black-pixel proportion",
+    "contrast": "pixel std (contrast)",
+}
 
 
 def compute_pca_projection(
@@ -196,6 +221,163 @@ def generate_pca_plot(
     plt.close(fig)
 
 
+def compute_pca_by_severity(
+    eyepacs_features: np.ndarray,
+    eyepacs_labels: np.ndarray,
+    olives_features: np.ndarray,
+    output_path: Path | str,
+    n_components: int = 2,
+) -> dict[str, float]:
+    """PCA on combined features, scattered by EyePACS DR severity with OLIVES overlay.
+
+    Returns per-class mean PC1 coordinates (EyePACS classes 0–4) plus the
+    overall EyePACS and OLIVES PC1 means and PC1/PC2 explained variance.
+    The plot at output_path uses 5 viridis-shaded series for EyePACS classes
+    and a single distinct colour for the OLIVES overlay.
+    """
+    if eyepacs_labels.shape[0] != eyepacs_features.shape[0]:
+        raise ValueError(
+            f"eyepacs_labels has {eyepacs_labels.shape[0]} rows but "
+            f"eyepacs_features has {eyepacs_features.shape[0]}. The feature "
+            "extraction order must match the shard iteration order."
+        )
+
+    coords_eye, coords_oli, pca = compute_pca_projection(
+        eyepacs_features, olives_features, n_components=n_components
+    )
+    pc1_eye = coords_eye[:, 0]
+    pc1_oli = coords_oli[:, 0]
+    var = pca.explained_variance_ratio_
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+    cmap = plt.cm.viridis
+    class_colors = cmap(np.linspace(0.1, 0.9, N_DR_CLASSES))
+    for cls in range(N_DR_CLASSES):
+        mask = eyepacs_labels == cls
+        if not mask.any():
+            continue
+        ax.scatter(
+            coords_eye[mask, 0],
+            coords_eye[mask, 1],
+            s=8,
+            alpha=0.4,
+            color=class_colors[cls],
+            label=f"EyePACS — {EYEPACS_LABEL_NAMES[cls]}",
+        )
+    ax.scatter(
+        coords_oli[:, 0],
+        coords_oli[:, 1],
+        s=4,
+        alpha=0.4,
+        color="red",
+        label="OLIVES",
+    )
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel(f"PC1 ({var[0]:.1%} variance)")
+    ax.set_ylabel(f"PC2 ({var[1]:.1%} variance)")
+    ax.set_title("PCA by DR severity (EyePACS) with OLIVES overlay")
+    ax.legend(loc="best", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+    means: dict[str, float] = {}
+    for cls in range(N_DR_CLASSES):
+        mask = eyepacs_labels == cls
+        means[f"class_{cls}"] = (
+            float(pc1_eye[mask].mean()) if mask.any() else float("nan")
+        )
+    means["eyepacs_all"] = float(pc1_eye.mean())
+    means["olives"] = float(pc1_oli.mean())
+    means["pc1_explained_variance"] = float(var[0])
+    means["pc2_explained_variance"] = float(var[1])
+    return means
+
+
+def compute_image_stats_correlation(
+    eyepacs_pt_dir: Path | str,
+    olives_pt_path: Path | str,
+    eyepacs_features: np.ndarray,
+    olives_features: np.ndarray,
+    output_path: Path | str,
+) -> dict[str, dict[str, float]]:
+    """Spearman correlation between per-image acquisition stats and PC1.
+
+    Stats per image: mean pixel intensity, black-pixel proportion (R-channel
+    below BLACK_PIXEL_THRESHOLD in normalised space), pixel std. PCA is
+    re-fit on the full combined features for axis consistency, then the
+    subsampled EyePACS and full OLIVES features are projected to PC1.
+    """
+    eyepacs_pt_dir = Path(eyepacs_pt_dir)
+    olives_pt_path = Path(olives_pt_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(SEVERITY_RNG_SEED)
+    n_eye = eyepacs_features.shape[0]
+    n_subsample = min(EYEPACS_STATS_SUBSAMPLE, n_eye)
+    indices_sorted = np.sort(
+        rng.choice(n_eye, n_subsample, replace=False)
+    ).astype(np.int64)
+
+    print(f"[stats] EyePACS subsample: {n_subsample} images from {n_eye}")
+    eyepacs_stats = _eyepacs_image_stats_at_indices(eyepacs_pt_dir, indices_sorted)
+    print(f"[stats] OLIVES: loading {olives_pt_path}")
+    olives_stats = _olives_image_stats(olives_pt_path)
+
+    pca = PCA(n_components=2, svd_solver="randomized", random_state=0)
+    pca.fit(np.vstack([eyepacs_features, olives_features]))
+    eyepacs_pc1 = pca.transform(eyepacs_features[indices_sorted])[:, 0]
+    olives_pc1 = pca.transform(olives_features)[:, 0]
+
+    if olives_stats["brightness"].shape[0] != olives_pc1.shape[0]:
+        raise ValueError(
+            f"OLIVES image stats length ({olives_stats['brightness'].shape[0]}) "
+            f"does not match feature count ({olives_pc1.shape[0]}). The "
+            "feature extraction order must match the .pt image order."
+        )
+
+    corrs: dict[str, dict[str, float]] = {}
+    for ds_name, stats, pc1 in (
+        ("eyepacs", eyepacs_stats, eyepacs_pc1),
+        ("olives", olives_stats, olives_pc1),
+    ):
+        for stat_name in ("brightness", "black_pixel", "contrast"):
+            rho, p_value = spearmanr(stats[stat_name], pc1)
+            corrs[f"{ds_name}_{stat_name}"] = {
+                "rho": float(rho),
+                "p_value": float(p_value),
+            }
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    for col, stat_name in enumerate(("brightness", "black_pixel", "contrast")):
+        for row, (ds_name, stats, pc1, color) in enumerate(
+            (
+                ("eyepacs", eyepacs_stats, eyepacs_pc1, "C0"),
+                ("olives", olives_stats, olives_pc1, "C3"),
+            )
+        ):
+            ax = axes[row, col]
+            ax.scatter(stats[stat_name], pc1, s=4, alpha=0.4, color=color)
+            entry = corrs[f"{ds_name}_{stat_name}"]
+            ax.set_title(
+                f"{ds_name.upper()} — {STAT_LABELS[stat_name]}\n"
+                f"ρ={entry['rho']:+.3f}, p={entry['p_value']:.2e}",
+                fontsize=10,
+            )
+            ax.set_xlabel(STAT_LABELS[stat_name])
+            ax.set_ylabel("PC1")
+    fig.suptitle("Per-image acquisition stats vs PC1", y=1.02)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    return corrs
+
+
 def _load_features(features_path: Path) -> tuple[np.ndarray, dict[str, Any]]:
     if not features_path.exists():
         raise FileNotFoundError(
@@ -209,6 +391,102 @@ def _load_features(features_path: Path) -> tuple[np.ndarray, dict[str, Any]]:
     feats = np.asarray(feats, dtype=np.float32)
     metadata = dict(blob.get("metadata", {}))
     return feats, metadata
+
+
+def _load_eyepacs_labels(shards_dir: Path | str) -> np.ndarray:
+    """Concatenate `labels` tensors from sorted shard files.
+
+    Iteration order must mirror feature_extraction.py's _iter_inputs (sorted
+    shard glob, within-shard order) so the returned labels align row-for-row
+    with the saved feature tensor.
+    """
+    shards_dir = Path(shards_dir)
+    shards = sorted(shards_dir.glob(EYEPACS_SHARD_GLOB))
+    if not shards:
+        raise FileNotFoundError(
+            f"No EyePACS shards in {shards_dir} — cannot load severity labels."
+        )
+    parts: list[np.ndarray] = []
+    for shard_path in shards:
+        data = torch.load(shard_path, map_location="cpu", weights_only=False)
+        labels = data["labels"]
+        if isinstance(labels, torch.Tensor):
+            labels = labels.numpy()
+        parts.append(np.asarray(labels))
+    return np.concatenate(parts).astype(np.int64)
+
+
+def _image_stats_chunked(images: torch.Tensor) -> dict[str, np.ndarray]:
+    """Per-image (brightness, black_pixel, contrast) for an (N, 3, H, W) tensor."""
+    n = images.shape[0]
+    brightness = np.empty(n, dtype=np.float32)
+    black = np.empty(n, dtype=np.float32)
+    contrast = np.empty(n, dtype=np.float32)
+    for start in range(0, n, IMAGE_STATS_CHUNK):
+        end = min(start + IMAGE_STATS_CHUNK, n)
+        chunk = images[start:end].float()
+        brightness[start:end] = chunk.mean(dim=(1, 2, 3)).numpy()
+        black[start:end] = (
+            (chunk[:, 0] < BLACK_PIXEL_THRESHOLD).float().mean(dim=(1, 2)).numpy()
+        )
+        contrast[start:end] = chunk.std(dim=(1, 2, 3)).numpy()
+    return {"brightness": brightness, "black_pixel": black, "contrast": contrast}
+
+
+def _eyepacs_image_stats_at_indices(
+    shards_dir: Path, indices_sorted: np.ndarray
+) -> dict[str, np.ndarray]:
+    """Stream-load only the requested global indices across sorted shards."""
+    shards = sorted(shards_dir.glob(EYEPACS_SHARD_GLOB))
+    if not shards:
+        raise FileNotFoundError(f"No EyePACS shards in {shards_dir}.")
+
+    n = len(indices_sorted)
+    brightness = np.empty(n, dtype=np.float32)
+    black = np.empty(n, dtype=np.float32)
+    contrast = np.empty(n, dtype=np.float32)
+
+    global_offset = 0
+    cursor = 0
+    for shard_path in tqdm(shards, desc="EyePACS image stats"):
+        if cursor >= n:
+            break
+        data = torch.load(shard_path, map_location="cpu", weights_only=False)
+        images = data["images"]
+        shard_size = images.shape[0]
+        end_cursor = cursor
+        while (
+            end_cursor < n
+            and indices_sorted[end_cursor] < global_offset + shard_size
+        ):
+            end_cursor += 1
+        if cursor < end_cursor:
+            local_idx = (
+                indices_sorted[cursor:end_cursor] - global_offset
+            ).astype(np.int64)
+            subset_stats = _image_stats_chunked(images[local_idx])
+            brightness[cursor:end_cursor] = subset_stats["brightness"]
+            black[cursor:end_cursor] = subset_stats["black_pixel"]
+            contrast[cursor:end_cursor] = subset_stats["contrast"]
+            cursor = end_cursor
+        global_offset += shard_size
+        del data, images
+
+    if cursor != n:
+        raise RuntimeError(
+            f"Only {cursor}/{n} EyePACS indices were loaded — "
+            "shards may be missing samples."
+        )
+    return {"brightness": brightness, "black_pixel": black, "contrast": contrast}
+
+
+def _olives_image_stats(pt_path: Path) -> dict[str, np.ndarray]:
+    if not pt_path.exists():
+        raise FileNotFoundError(
+            f"OLIVES tensor file not found at {pt_path}."
+        )
+    data = torch.load(pt_path, map_location="cpu", weights_only=False)
+    return _image_stats_chunked(data["images"])
 
 
 def _interpret(
@@ -230,24 +508,68 @@ def _interpret(
         mmd_label = "a significant distributional difference"
     else:
         mmd_label = "no statistically significant distributional difference"
-    bridge = (
-        "the datasets share substantial latent structure and look bridgeable "
-        "via contrastive alignment or a learned projection head"
-        if cos_avg >= 0.5
-        else "the datasets occupy noticeably distinct regions of feature "
-        "space and will need careful adaptation before joint encoding"
-    )
-    return (
+
+    parts: list[str] = []
+    parts.append(
         f"In ResNet-50 ImageNet feature space, {label_a} and {label_b} show "
         f"{cos_label} (mean cosine = {cos_avg:.3f}) and {mmd_label} "
         f"(MMD permutation p = {p_value:.4f}). The Fréchet distance is "
         f"{results['frechet_distance']:.2f}; FID is comparable across runs "
-        f"of the same pair but not across dataset pairs without a baseline. "
-        f"PCA projects {sum(results['pca_var'][:2]):.1%} of the joint "
-        f"variance into 2D, so the scatter plot is indicative rather than "
-        f"definitive. Taken together, these results suggest "
-        f"{bridge}."
+        f"of the same pair but not across dataset pairs without a baseline."
     )
+    parts.append(
+        f"PCA projects {sum(results['pca_var'][:2]):.1%} of the joint variance "
+        "into 2D, so the global scatter plot is indicative rather than definitive."
+    )
+
+    severity_label = results.get("severity_shift_label")
+    spread = results.get("severity_spread")
+    centroid_distance = results.get("severity_centroid_distance")
+    if severity_label is not None:
+        parts.append(
+            f"PCA stratified by DR severity (Section 7) classifies the shift as "
+            f"**{severity_label}**: the EyePACS class-mean spread on PC1 is "
+            f"{spread:.3f} versus a {label_a}↔{label_b} centroid distance of "
+            f"{centroid_distance:.3f} on PC1."
+        )
+
+    strongest = results.get("strongest_stat_corr")
+    if strongest is not None:
+        ds_key, stat_key = strongest["key"].split("_", 1)
+        ds_label = label_a if ds_key == "eyepacs" else label_b
+        stat_label = STAT_LABELS.get(stat_key, stat_key)
+        parts.append(
+            f"PC1 is most strongly correlated with {ds_label} {stat_label} "
+            f"(Spearman ρ = {strongest['rho']:+.3f}, "
+            f"p = {strongest['p_value']:.2e}; Section 8), indicating the "
+            f"dominant separation axis tracks acquisition-level variation "
+            f"rather than retinal pathology content."
+        )
+
+    if severity_label and "Acquisition-driven" in severity_label:
+        verdict = (
+            "the shift is **mechanism-confirmed bridgeable** — PC1 carries "
+            "acquisition signal, not pathology, so contrastive alignment or "
+            "a learned projection head should close the gap"
+        )
+    elif severity_label and "Pathology-correlated" in severity_label:
+        verdict = (
+            "the shift is **concerning** — PC1 carries DR pathology signal, "
+            "so naive joint encoding risks confounding domain with severity; "
+            "careful adaptation will be needed"
+        )
+    elif cos_avg >= 0.5:
+        verdict = (
+            "the datasets share substantial latent structure and look "
+            "bridgeable via contrastive alignment or a learned projection head"
+        )
+    else:
+        verdict = (
+            "the datasets occupy noticeably distinct regions of feature "
+            "space and will need careful adaptation before joint encoding"
+        )
+    parts.append(f"**Conclusion:** {verdict}.")
+    return " ".join(parts)
 
 
 def _build_report(
@@ -345,6 +667,93 @@ def _build_report(
     lines.append("")
     lines.append(_interpret(results, label_a, label_b))
     lines.append("")
+
+    severity_means = results.get("severity_means")
+    if severity_means is not None:
+        lines.append("## 7. PCA stratified by DR severity")
+        lines.append("")
+        lines.append(f"![PCA by severity]({SEVERITY_PLOT_FILENAME})")
+        lines.append("")
+        lines.append("Per-class mean PC1 coordinate:")
+        lines.append("")
+        lines.append("| Class | Mean PC1 |")
+        lines.append("|-------|---------:|")
+        for cls in range(N_DR_CLASSES):
+            lines.append(
+                f"| {label_a} class {cls} ({EYEPACS_LABEL_NAMES[cls]}) | "
+                f"{severity_means[f'class_{cls}']:.4f} |"
+            )
+        lines.append(
+            f"| {label_a} (overall) | {severity_means['eyepacs_all']:.4f} |"
+        )
+        lines.append(
+            f"| {label_b} (overall) | {severity_means['olives']:.4f} |"
+        )
+        lines.append("")
+        lines.append(
+            f"- {label_a} class-mean spread on PC1: "
+            f"**{results['severity_spread']:.4f}**"
+        )
+        lines.append(
+            f"- {label_a}↔{label_b} centroid distance on PC1: "
+            f"**{results['severity_centroid_distance']:.4f}**"
+        )
+        lines.append(
+            f"- Verdict: **{results['severity_shift_label']}**"
+        )
+        lines.append("")
+        lines.append(
+            "> If EyePACS classes overlap on PC1, the shift to OLIVES "
+            "(visible as a distinct cluster) is acquisition-driven rather "
+            "than pathology-driven and should be bridgeable by contrastive "
+            "alignment. If EyePACS classes form distinct PC1 sub-clusters, "
+            "PC1 captures pathology variation and the OLIVES shift is more "
+            "concerning."
+        )
+        lines.append("")
+
+    image_stats = results.get("image_stats")
+    if image_stats is not None:
+        lines.append("## 8. Image statistics correlation with PC1")
+        lines.append("")
+        lines.append(f"![Stats vs PC1]({IMAGE_STATS_PLOT_FILENAME})")
+        lines.append("")
+        lines.append(
+            "Spearman rank correlation between per-image acquisition stats "
+            "and PC1, by dataset:"
+        )
+        lines.append("")
+        lines.append("| Dataset | Stat | ρ | p-value |")
+        lines.append("|---------|------|--:|--------:|")
+        for ds_key, ds_label in (("eyepacs", label_a), ("olives", label_b)):
+            for stat_key in ("brightness", "black_pixel", "contrast"):
+                entry = image_stats[f"{ds_key}_{stat_key}"]
+                lines.append(
+                    f"| {ds_label} | {STAT_LABELS[stat_key]} | "
+                    f"{entry['rho']:+.4f} | {entry['p_value']:.2e} |"
+                )
+        lines.append("")
+        strongest = results.get("strongest_stat_corr")
+        if strongest is not None:
+            ds_key, stat_key = strongest["key"].split("_", 1)
+            ds_label = label_a if ds_key == "eyepacs" else label_b
+            lines.append(
+                f"**Strongest correlation:** {ds_label} "
+                f"{STAT_LABELS.get(stat_key, stat_key)} ↔ PC1, "
+                f"ρ = {strongest['rho']:+.3f} "
+                f"(p = {strongest['p_value']:.2e})."
+            )
+            lines.append("")
+            lines.append(
+                f"> The dominant separation direction (PC1) is most strongly "
+                f"correlated with **{STAT_LABELS.get(stat_key, stat_key)}** "
+                f"in {ds_label}, {'confirming' if abs(strongest['rho']) >= 0.3 else 'suggesting'} "
+                f"that the shift is driven by acquisition-level differences "
+                f"(field-stop, framing, exposure) rather than retinal "
+                f"pathology content."
+            )
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -425,6 +834,56 @@ def _run_diagnostics(
         f"{label_b}→{label_a}: μ={results['cosine']['b_to_a_mean']:.4f} "
         f"({time.time() - t0:.1f}s)"
     )
+
+    eyepacs_pt_dir = Path(str(cfg.eyepacs_output))
+    olives_pt_path = Path(str(cfg.olives_output)) / OLIVES_INPUT_FILENAME
+
+    print("\n[diagnostics] PCA stratified by DR severity")
+    t0 = time.time()
+    eyepacs_labels = _load_eyepacs_labels(eyepacs_pt_dir)
+    severity_path = results_dir / SEVERITY_PLOT_FILENAME
+    severity_means = compute_pca_by_severity(
+        feats_a, eyepacs_labels, feats_b, severity_path
+    )
+    results["severity_means"] = severity_means
+    class_means = [severity_means[f"class_{cls}"] for cls in range(N_DR_CLASSES)]
+    valid_means = [m for m in class_means if not np.isnan(m)]
+    spread = (
+        max(valid_means) - min(valid_means) if valid_means else 0.0
+    )
+    centroid_distance = abs(severity_means["eyepacs_all"] - severity_means["olives"])
+    if centroid_distance > 0 and spread < SHIFT_SPREAD_RATIO * centroid_distance:
+        shift_label = "Acquisition-driven shift (favourable)"
+    else:
+        shift_label = "Pathology-correlated shift (concerning)"
+    results["severity_spread"] = float(spread)
+    results["severity_centroid_distance"] = float(centroid_distance)
+    results["severity_shift_label"] = shift_label
+    print(
+        f"  spread={spread:.4f}, centroid_distance={centroid_distance:.4f}, "
+        f"verdict={shift_label} ({time.time() - t0:.1f}s)"
+    )
+    print(f"  plot saved to {severity_path}")
+
+    print("\n[diagnostics] Image stats vs PC1")
+    t0 = time.time()
+    stats_path = results_dir / IMAGE_STATS_PLOT_FILENAME
+    image_stats = compute_image_stats_correlation(
+        eyepacs_pt_dir, olives_pt_path, feats_a, feats_b, stats_path
+    )
+    results["image_stats"] = image_stats
+    strongest_key = max(image_stats, key=lambda k: abs(image_stats[k]["rho"]))
+    results["strongest_stat_corr"] = {
+        "key": strongest_key,
+        "rho": image_stats[strongest_key]["rho"],
+        "p_value": image_stats[strongest_key]["p_value"],
+    }
+    print(
+        f"  strongest: {strongest_key} ρ={image_stats[strongest_key]['rho']:+.3f} "
+        f"p={image_stats[strongest_key]['p_value']:.2e} "
+        f"({time.time() - t0:.1f}s)"
+    )
+    print(f"  plot saved to {stats_path}")
 
     report_path = results_dir / REPORT_FILENAME
     report_path.write_text(_build_report(results, plot_path, label_a, label_b))
