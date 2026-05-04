@@ -17,3 +17,9 @@ olives_labels_csv: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/ml
 olives_clinical_xlsx: /content/drive/MyDrive/olives_labels/OLIVES_Dataset_Labels/full_labels/Clinical_Data_Images.xlsx
 olives_output: /content/drive/MyDrive/dissertation/preprocessed/olives
 scratch_dir: /content/scratch/olives_fundus
+
+# ResNet-50 feature outputs (created on demand by src.analysis.feature_extraction)
+features_dir: /content/drive/MyDrive/dissertation/features
+
+# Phase-1 diagnostics outputs (PCA plot + markdown report under <results_dir>/phase1/)
+results_dir: /content/drive/MyDrive/dissertation/results
