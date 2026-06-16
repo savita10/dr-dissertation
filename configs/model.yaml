@@ -1,0 +1,22 @@
+# Architecture
+backbone: resnet50
+pretrained_weights: IMAGENET1K_V2
+encoder_dim: 2048
+projection_dim: 512
+num_dr_classes: 5
+num_biomarkers: 9
+usable_biomarker_indices: [1, 3, 5, 6, 7, 8, 10, 11, 12]
+
+# Loss weights
+loss_weights:
+  w_dr: 1.0
+  w_biomarker: 0.5
+  w_regression: 1.0
+  w_supcon: 0.5
+  w_coral: 1.0
+  w_ntxent: 0.0          # built but deferred; default off
+
+# Loss hyperparameters
+supcon_temperature: 0.07
+ntxent_temperature: 0.07
+coral_min_samples: 2     # per-domain minimum before CORAL contributes
