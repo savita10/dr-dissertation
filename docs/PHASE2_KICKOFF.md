@@ -6,7 +6,7 @@
 **Phase 2 start**: May 2026
 **Revision**: v2 — incorporates the agreed Phase 2a design review (multi-term loss with explicit CORAL alignment, augmentation pipeline specification, correctness-trap mitigations, `configs/model.yaml`, and the 2048-d diagnostic decision).
 
-This document is the single self-contained reference for Phase 2. A new Claude (or a future you) reading only this document has enough context to generate every Phase 2 implementation prompt without the preprocessing history.
+This document is the single self-contained reference for Phase 2. Anyone reading only this document — including a future you — has enough context to generate every Phase 2 implementation prompt without the preprocessing history.
 
 > **Change log vs v1** (what this revision adds)
 > - Loss design expanded from SupCon-only to a **four-active-term loss** (DR CE + biomarker BCE + BCVA/CST MSE + SupCon) **plus an explicit CORAL cross-dataset alignment term**, with an **optional NT-Xent two-view SSL term** built but defaulted off (weight 0).
@@ -246,12 +246,12 @@ coral_min_samples: 2    # per-domain minimum before CORAL contributes
 
 ### Repository
 - GitHub: `github.com/savita10/dr-dissertation`
-- Local: VS Code workspace (Claude Code)
+- Local: VS Code workspace
 - Colab: `/content/dr-dissertation` (cloned fresh each session)
 - Drive (persistent): `/content/drive/MyDrive/dissertation/`
 
 ### Development cycle
-1. **VS Code (Claude Code)**: write/edit code in `src/`, configs in `configs/`.
+1. **VS Code**: write/edit code in `src/`, configs in `configs/`.
 2. **PowerShell**: `git add . && git commit -m "..." && git push`.
 3. **Colab notebook**: `!git -C /content/dr-dissertation pull` then `!python -m src.module.name --config configs/whatever.yaml`.
 
@@ -306,7 +306,7 @@ dr-dissertation/
 
 ## 7. Phase 2 implementation plan (summary)
 
-Four sub-phases, each its own Claude Code prompt, each gated by a validation checkpoint. (Full decomposition with cross-boundary loss composition is in the companion `PHASE2_IMPLEMENTATION_PLAN.md`.)
+Four sub-phases, each its own implementation prompt, each gated by a validation checkpoint. (Full decomposition with cross-boundary loss composition is in the companion `PHASE2_IMPLEMENTATION_PLAN.md`.)
 
 ### Phase 2a — Model architecture + losses
 New files: `src/models/{__init__,encoder,heads,model,losses,smoke_test}.py`, `configs/model.yaml`.
@@ -339,7 +339,7 @@ Re-run the six Phase 1 diagnostics on the trained **2048-d encoder** embeddings 
 
 ## 9. User preferences (for whoever generates prompts)
 
-- Step-by-step prompts to paste into Claude Code in VS Code.
+- Step-by-step prompts to paste into the coding assistant in VS Code.
 - Push/pull workflow between PowerShell and Colab.
 - Validation step after each sub-phase before moving on.
 - Plain-language explanations alongside technical content (working professional, technically literate, not an ML researcher).
