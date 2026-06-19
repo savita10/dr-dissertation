@@ -1,0 +1,29 @@
+paths:
+  eyepacs_dir: /content/drive/MyDrive/dissertation/preprocessed/eyepacs
+  olives_file: /content/drive/MyDrive/dissertation/preprocessed/olives/olives_fundus.pt
+  eyepacs_cache: /content/eyepacs_cache          # local lazy-access cache (not Drive)
+  regression_stats: /content/drive/MyDrive/dissertation/preprocessed/regression_stats.json
+
+split:
+  seed: 42
+  train: 0.70
+  val: 0.15
+  test: 0.15
+
+batch:
+  eyepacs_per_batch: 24
+  olives_per_batch: 16
+  eval_batch_size: 64
+
+augmentation:
+  rrc_scale: [0.6, 1.0]
+  rrc_ratio: [0.9, 1.1]
+  jitter_brightness: 0.2
+  jitter_contrast: 0.2
+  rotation_degrees: 15
+  hflip_prob: 0.5
+  two_view: false            # second augmented view for NT-Xent; off by default
+
+usable_biomarker_indices: [1, 3, 5, 6, 7, 8, 10, 11, 12]
+imagenet_mean: [0.485, 0.456, 0.406]
+imagenet_std:  [0.229, 0.224, 0.225]
