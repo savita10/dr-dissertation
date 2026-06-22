@@ -1,0 +1,33 @@
+run_name: coral_off
+seed: 42
+
+optimizer:
+  lr_backbone: 1.0e-5
+  lr_heads: 1.0e-3
+  weight_decay: 1.0e-4
+
+schedule:
+  warmup_steps: 500           # linear warmup, then cosine to ~0 over max_epochs
+
+train:
+  max_epochs: 30
+  early_stopping_patience: 5
+  amp: true                   # CORAL/SupCon still computed in fp32
+  grad_clip_norm: 1.0
+  select_metric: dr_qwk       # maximise; gates *_best.pt
+
+loss_weight_overrides:        # ablation arm — alignment term off
+  w_coral: 0.0
+
+checkpoint:
+  dir: /content/drive/MyDrive/dissertation/checkpoints
+  resume: auto                # auto (resume if *_last.pt exists) | never | <path>
+
+paths:
+  model_config: configs/model.yaml
+  data_config: configs/data.yaml
+
+smoke:
+  eyepacs_subset: 1000
+  olives_subset: 200
+  epochs: 2
