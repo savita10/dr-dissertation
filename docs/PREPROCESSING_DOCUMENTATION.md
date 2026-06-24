@@ -277,6 +277,10 @@ src/utils/
 
 docs/
 └── PREPROCESSING_DOCUMENTATION.md       ← This document
+
+notebooks/
+├── 02_preprocess.ipynb                  ← Colab wrapper for the preprocessing pipeline
+└── 01c_data_inspection.ipynb            ← Colab wrapper for source data inspection
 ```
 
 Repository: `https://github.com/savita10/dr-dissertation`

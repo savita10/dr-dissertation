@@ -208,6 +208,8 @@ For navigation: the following artefacts were produced during Phase 1 and are sto
 - `src/analysis/feature_extraction.py` — ResNet-50 feature extraction
 - `src/analysis/distribution_diagnostics.py` — six diagnostics + report generator
 - `configs/preprocess.yaml` — paths and parameters
+- `notebooks/03_phase1_distributional_validation.ipynb` — Phase 1 diagnostics orchestrator (Colab wrapper)
+- `notebooks/01c_data_inspection.ipynb` — pre-Phase 1 source data inspection (Colab wrapper)
 
 **Data artefacts** (Google Drive):
 - `/dissertation/preprocessed/eyepacs/eyepacs_shard_*.pt` — 8 EyePACS shards (~22 GB total)
