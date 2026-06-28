@@ -1,0 +1,26 @@
+checkpoint_dir: /content/drive/MyDrive/dissertation/checkpoints
+features_dir:   /content/drive/MyDrive/dissertation/features
+report_dir:     /content/drive/MyDrive/dissertation/reports
+
+arms:
+  - coral_on
+  - coral_off
+
+eyepacs_dir: /content/drive/MyDrive/dissertation/preprocessed/eyepacs
+olives_file: /content/drive/MyDrive/dissertation/preprocessed/olives/olives_fundus.pt
+
+# Phase 1 baseline, for the before/after table (do not recompute)
+phase1_baseline:
+  fid: 240.65
+  mmd_p: 0.0
+  cosine: 0.55
+  pc1_black_border_rho: -0.274
+
+targets:
+  fid_max: 100
+  mmd_p_min: 0.05
+  cosine_min: 0.70
+  rho_abs_max: 0.10
+
+splits: [full, test]     # full = all data (mirrors Phase 1); test = held-out generalisation check
+seed: 42
