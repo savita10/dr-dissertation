@@ -37,20 +37,16 @@ Project conventions for the diabetic retinopathy progression prediction disserta
 - **EyePACS** — fundus images only (single modality). Source: HuggingFace dataset `bumbledeep/eyepacs`, saved to Drive in Arrow format and loaded via `datasets.load_from_disk`. Do **not** use `EYEPACS.zip` — the zip path is retained in `configs/paths.yaml` for reference only.
 - **OLIVES** — multimodal (fundus + OCT + clinical).
 
-## Current Phase: Distribution Validation
+## Current Phase: Phase 2 (Model Development)
 
-The project is currently in the **DISTRIBUTION VALIDATION** phase. The goal is to validate whether EyePACS and OLIVES feature distributions are compatible in a shared latent space.
+The project is in **Phase 2 — Model Development**. Phases 2a (model architecture + multi-term loss), 2b (data loading, augmentation, patient-aware sampling), and 2c (training pipeline) are complete; **Phase 2d (post-training diagnostics)** is in progress.
 
-The dissertation supervisor requires this validation to pass before any model training or architectural development begins. **Do not** scaffold or implement model architecture, training loops, or evaluation code during this phase.
+> Phase 1 distribution validation passed (FID 240.65); project advanced to Phase 2 model development.
 
-## Roadmap (post-validation)
-
-Once distribution validation is satisfactory, the project will proceed with:
+## Roadmap
 
 1. Encoder pretraining
 2. Contrastive alignment
 3. Multimodal fusion
 4. Longitudinal prediction
 5. Uncertainty quantification
-
-None of the above should be implemented until validation results are confirmed.
