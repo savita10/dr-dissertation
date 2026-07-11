@@ -49,7 +49,8 @@ from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 
 # --------------------------------------------------------------------- palette
-# Okabe-Ito colourblind-safe hues for the two datasets.
+# Okabe-Ito colourblind-safe hues for the two modalities (EyePACS colour fundus
+# vs OLIVES near-IR fundus).
 COLOR_EYEPACS = "#0072B2"  # blue
 COLOR_OLIVES = "#E69F00"  # orange
 COLOR_BASELINE = "#999999"  # neutral grey for "before" bars
@@ -307,11 +308,13 @@ def fig_dataset_summary_table(cfg: FiguresConfig) -> dict[str, Path]:
 
 # ================================================================== FIGURE 2 ==
 def fig_acquisition_pca(cfg: FiguresConfig) -> dict[str, Path]:
-    """Figure 2 — Phase 1 acquisition PCA (before training).
+    """Figure 2 — Phase 1 modality-gap PCA (before training).
 
-    PCA fit on the combined Phase 1 ImageNet features of both datasets; scatter
-    coloured by dataset. Annotates the PC1 <-> black-border Spearman ρ from the
-    baseline (-0.274). If the per-image border proportion is available (from the
+    PCA fit on the combined Phase 1 ImageNet features of both modalities
+    (EyePACS colour fundus vs OLIVES near-IR fundus); scatter coloured by
+    modality. Annotates the PC1 <-> black-border Spearman ρ from the baseline
+    (-0.274) — field-stop geometry is one measurable facet of the colour→near-IR
+    modality gap. If the per-image border proportion is available (from the
     row-aligned Phase 2 full-split ``image_stats``), a second panel plots PC1 vs
     border proportion. Writes ``fig02_acquisition_pca.{png,pdf}``.
     """
@@ -346,7 +349,7 @@ def fig_acquisition_pca(cfg: FiguresConfig) -> dict[str, Path]:
     )
     ax0.set_xlabel(f"PC1 ({var[0]:.1%} variance)")
     ax0.set_ylabel(f"PC2 ({var[1]:.1%} variance)")
-    ax0.set_title("Phase 1 (ImageNet features): acquisition-separated")
+    ax0.set_title("Phase 1 (ImageNet features): modality-separated")
     ax0.legend(loc="best", markerscale=2)
     rho_text = f"{PHASE1_RHO:+.3f}" if rho is None else f"{rho:+.3f}"
     ax0.annotate(
@@ -363,10 +366,11 @@ def fig_acquisition_pca(cfg: FiguresConfig) -> dict[str, Path]:
         )
         ax1.set_xlabel("Black-border proportion (EyePACS)")
         ax1.set_ylabel("PC1")
-        ax1.set_title(f"PC1 tracks acquisition geometry (ρ = {rho:+.3f})")
+        ax1.set_title(f"PC1 tracks field-stop geometry (ρ = {rho:+.3f})")
 
     fig.suptitle(
-        "Before training, the dominant axis is camera geometry, not pathology",
+        "Before training, the dominant axis is the colour→near-IR modality gap, "
+        "not pathology",
         y=1.02, fontsize=13,
     )
     return _save(fig, cfg, "fig02_acquisition_pca")
@@ -503,11 +507,12 @@ def fig_training_curves(cfg: FiguresConfig) -> dict[str, dict[str, Path]]:
 
 # ================================================================== FIGURE 5 ==
 def fig_fid_bar(cfg: FiguresConfig) -> dict[str, Path]:
-    """Figure 5 — cross-dataset FID before/after alignment.
+    """Figure 5 — cross-modality FID before/after alignment.
 
     Bar chart Phase 1 baseline -> coral_off -> coral_on from
-    ``phase2_results.json``, annotated with the overall percentage drop.
-    Writes ``fig05_fid_bar.{png,pdf}``.
+    ``phase2_results.json``, annotated with the overall percentage drop. FID here
+    measures the colour-fundus <-> near-IR-fundus modality gap. Writes
+    ``fig05_fid_bar.{png,pdf}``.
     """
     set_style()
     res = _load_results(cfg)
@@ -536,7 +541,7 @@ def fig_fid_bar(cfg: FiguresConfig) -> dict[str, Path]:
         fontsize=11, fontweight="bold", color="#444444",
     )
     ax.set_ylabel("Fréchet distance (FID)")
-    ax.set_title("Cross-dataset FID collapses after training")
+    ax.set_title("Cross-modality FID collapses after training")
     ax.set_ylim(0, baseline * 1.12)
     ax.legend(loc="upper right")
     # Honest framing: the CORAL term contributes only marginally.
@@ -553,8 +558,8 @@ def fig_fid_bar(cfg: FiguresConfig) -> dict[str, Path]:
 def fig_pca_before_after(cfg: FiguresConfig) -> dict[str, dict[str, Path]]:
     """Figure 6 — PCA before vs after (the marquee figure).
 
-    Two panels sharing style: before = Phase 1 features (acquisition-separated),
-    after = Phase 2 ``coral_on`` features, both coloured by dataset. A second
+    Two panels sharing style: before = Phase 1 features (modality-separated),
+    after = Phase 2 ``coral_on`` features, both coloured by modality. A second
     figure re-colours the "after" panel by EyePACS DR severity to show the
     pathology ordering. Writes ``fig06a_pca_before_after.*`` and
     ``fig06b_pca_after_severity.*``.
@@ -571,7 +576,7 @@ def fig_pca_before_after(cfg: FiguresConfig) -> dict[str, dict[str, Path]]:
     ce_b, co_b, pca_b = _joint_pca(eye_b, oli_b)
     ce_a, co_a, pca_a = _joint_pca(eye_a, oli_a)
 
-    # Panel figure: before vs after, coloured by dataset.
+    # Panel figure: before vs after, coloured by modality.
     fig, axes = plt.subplots(1, 2, figsize=(13, 6))
     for ax, (ce, co, pca, title) in zip(
         axes,
@@ -590,7 +595,8 @@ def fig_pca_before_after(cfg: FiguresConfig) -> dict[str, dict[str, Path]]:
         ax.set_title(title)
         ax.legend(loc="best", markerscale=2)
     fig.suptitle(
-        "PCA before/after: the dominant axis flips from acquisition to alignment",
+        "PCA before/after: the dominant axis flips from the modality gap "
+        "toward alignment",
         y=1.02, fontsize=13,
     )
     out["by_dataset"] = _save(fig, cfg, "fig06a_pca_before_after")
@@ -630,11 +636,12 @@ def fig_tsne_umap_joint(
     """Figure 7 — joint 2-D embedding of the coral_on features.
 
     Computes one 2-D embedding of the combined ``coral_on`` full features and
-    plots it twice: coloured by dataset (should intermix = alignment) and by DR
-    severity (should separate = pathology). Uses UMAP if ``umap-learn`` imports,
-    else falls back to ``sklearn.manifold.TSNE`` (prints which). EyePACS is
-    subsampled to ``eyepacs_cap`` points for tractability; all OLIVES kept.
-    Writes ``fig07a_embed_by_dataset.*`` and ``fig07b_embed_by_severity.*``.
+    plots it twice: coloured by modality (colour fundus vs near-IR — brought much
+    closer but still distinguishable across the modality gap) and by DR severity
+    (should separate = pathology). Uses UMAP if ``umap-learn`` imports, else falls
+    back to ``sklearn.manifold.TSNE`` (prints which). EyePACS is subsampled to
+    ``eyepacs_cap`` points for tractability; all OLIVES kept. Writes
+    ``fig07a_embed_by_dataset.*`` and ``fig07b_embed_by_severity.*``.
     """
     set_style()
     eye_blob = _load_pt(_phase2_path(cfg, "coral_on", "full", "eyepacs"))
@@ -676,7 +683,12 @@ def fig_tsne_umap_joint(
     caption = f"{method}; EyePACS subsampled to {n_eye:,}, all {oli.shape[0]:,} OLIVES"
     out: dict[str, dict[str, Path]] = {}
 
-    # By dataset.
+    # By modality.
+    modality_caption = (
+        "Substantial but partial alignment: colour fundus and near-IR are brought "
+        "much closer distributionally (FID −69%) but remain distinguishable, as "
+        "expected across a colour→near-IR modality gap."
+    )
     fig, ax = plt.subplots(figsize=(7.5, 6.5))
     ax.scatter(emb_eye[:, 0], emb_eye[:, 1], s=6, alpha=0.35, color=COLOR_EYEPACS,
                label="EyePACS", edgecolors="none")
@@ -684,10 +696,10 @@ def fig_tsne_umap_joint(
                label="OLIVES", edgecolors="none")
     ax.set_xlabel(f"{method}-1")
     ax.set_ylabel(f"{method}-2")
-    ax.set_title(f"{method} of coral_on features — by dataset (intermix = alignment)")
+    ax.set_title(f"{method} of coral_on features — by modality (colour vs near-IR)")
     ax.legend(loc="best", markerscale=2)
-    ax.annotate(caption, xy=(0.5, -0.12), xycoords="axes fraction", ha="center",
-                fontsize=8.5, color="#666666")
+    ax.annotate(modality_caption, xy=(0.5, -0.12), xycoords="axes fraction",
+                ha="center", fontsize=8.5, color="#666666")
     out["by_dataset"] = _save(fig, cfg, "fig07a_embed_by_dataset")
 
     # By severity.
@@ -757,7 +769,9 @@ def fig_acquisition_rho_before_after(cfg: FiguresConfig) -> dict[str, Path]:
 
     Bar chart of the PC1<->black-border Spearman ρ (EyePACS): Phase 1 baseline
     (-0.274) vs Phase 2 ``coral_on`` (from ``phase2_results.json``), with the
-    ±|ρ| target band drawn. Writes ``fig09_acquisition_rho.{png,pdf}``.
+    ±|ρ| target band drawn. Field-stop geometry is one measurable facet of the
+    colour→near-IR modality gap; this tracks that facet collapsing. Writes
+    ``fig09_acquisition_rho.{png,pdf}``.
     """
     set_style()
     res = _load_results(cfg)
@@ -780,7 +794,7 @@ def fig_acquisition_rho_before_after(cfg: FiguresConfig) -> dict[str, Path]:
                 value + (0.01 if value >= 0 else -0.01),
                 f"{value:+.3f}", ha="center", va=va, fontsize=11)
     ax.set_ylabel("PC1 ↔ black-border Spearman ρ (EyePACS)")
-    ax.set_title("Acquisition correlation collapses into the target band")
+    ax.set_title("Field-stop correlation collapses into the target band")
     ax.legend(loc="best")
     lo = min(values + [-target]) - 0.05
     hi = max(values + [target]) + 0.05
