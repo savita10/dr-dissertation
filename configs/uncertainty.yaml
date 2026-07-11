@@ -1,0 +1,17 @@
+checkpoint: /content/drive/MyDrive/dissertation/checkpoints/phase2_coral_on_best.pt
+features_dir: /content/drive/MyDrive/dissertation/features
+report_dir:  /content/drive/MyDrive/dissertation/reports
+figures_dir: /content/drive/MyDrive/dissertation/figures
+
+tta:
+  n_passes: 30            # augmented forward passes per image
+  augmentation: full      # reuse full training-strength pipeline
+  batch_size: 64
+  include_clean_pass: true  # also record the un-augmented prediction
+
+calibration:
+  n_bins: 15              # for ECE / reliability diagram
+  bootstrap_n: 1000       # bootstrap resamples for CIs
+  seed: 42
+
+eyepacs_test_only: true   # calibrate on the held-out test split
