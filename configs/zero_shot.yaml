@@ -1,0 +1,13 @@
+checkpoint: /content/drive/MyDrive/dissertation/checkpoints/phase2_coral_on_best.pt
+features_dir: /content/drive/MyDrive/dissertation/features
+report_dir:  /content/drive/MyDrive/dissertation/reports
+figures_dir: /content/drive/MyDrive/dissertation/figures
+
+tta:
+  n_passes: 30
+  augmentation: full
+  batch_size: 64
+  include_clean_pass: true
+
+eyepacs_tta_cache: /content/drive/MyDrive/dissertation/features/tta_eyepacs_test.pt  # for the comparison
+seed: 42
