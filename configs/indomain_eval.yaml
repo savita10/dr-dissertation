@@ -1,0 +1,15 @@
+checkpoint: /content/drive/MyDrive/dissertation/checkpoints/phase2_coral_on_best.pt
+features_dir: /content/drive/MyDrive/dissertation/features
+report_dir:  /content/drive/MyDrive/dissertation/reports
+figures_dir: /content/drive/MyDrive/dissertation/figures
+
+eval:
+  batch_size: 64
+  bootstrap_n: 1000
+  f1_threshold: 0.5
+
+seed: 42                     # patient-aware split seed (must match Phase 2b)
+
+benchmarks:
+  biomarker_auroc: 0.80      # Kokilepersaud et al., 2023 (OLIVES DME/DR tasks)
+  cst_r2: 0.29               # Sükei et al., 2024
