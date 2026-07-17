@@ -1,0 +1,55 @@
+# Greyscale ablation — Variant C / Design C1 training config.
+#
+# Mirrors configs/train.yaml (the Phase 2 CORAL-on schema) EXACTLY — same
+# architecture (via model.yaml), heads, losses, optimizer, schedule, seed 42,
+# and splits — so the harmonised run is a clean, single-variable comparison.
+# The ONLY differences from Phase 2 are:
+#   * run_name / checkpoint.dir  -> a NEW checkpoint under greyscale_experiment/
+#                                   (never phase2_coral_on_best.pt)
+#   * harmonise + reference_hist -> turn on Design C1 EyePACS harmonisation
+#
+# The harmonise flag is consumed by the NEW Prompt-2 training wrapper, which
+# calls the existing build_dataloaders(cfg) and then applies GreenHistMatch to
+# the EyePACS sub-datasets ONLY (OLIVES stays raw near-IR) via
+# src.preprocessing.harmonise.harmonise_eyepacs_in_bundle. The existing
+# train.py / dataloaders.py / transforms.py are NOT modified; when this flag is
+# absent/false the colour path is unchanged.
+
+run_name: greenhistmatch      # -> checkpoint phase2_greenhistmatch_best.pt
+seed: 42
+
+optimizer:
+  lr_backbone: 1.0e-5
+  lr_heads: 1.0e-3
+  weight_decay: 1.0e-4
+
+schedule:
+  warmup_steps: 500           # linear warmup, then cosine to ~0 over max_epochs
+
+train:
+  max_epochs: 30
+  early_stopping_patience: 5
+  amp: true                   # CORAL/SupCon still computed in fp32
+  grad_clip_norm: 1.0
+  select_metric: dr_qwk       # maximise; gates *_best.pt
+
+loss_weight_overrides: {}     # merged over configs/model.yaml loss_weights
+
+# ── Design C1 harmonisation (NEW; consumed by the Prompt-2 training wrapper) ──
+harmonise: true                                    # EyePACS-only green + hist-match
+reference_hist: /content/drive/MyDrive/dissertation/greyscale_experiment/olives_reference_hist.npy
+reference_channel: 1          # extract green (0=R, 1=G, 2=B) from colour EyePACS
+reference_hist_bins: 256      # bins for scripts/compute_olives_histogram.py
+
+checkpoint:
+  dir: /content/drive/MyDrive/dissertation/greyscale_experiment   # NEW — not the Phase 2 dir
+  resume: auto                # auto (resume if *_last.pt exists) | never | <path>
+
+paths:
+  model_config: configs/model.yaml   # unchanged Phase 2 architecture/heads/losses
+  data_config: configs/data.yaml     # unchanged Phase 2 splits/augmentation/stats
+
+smoke:
+  eyepacs_subset: 1000
+  olives_subset: 200
+  epochs: 2

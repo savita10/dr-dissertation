@@ -1,0 +1,30 @@
+# Greyscale ablation — Design C1 zero-shot evaluation config.
+#
+# Mirrors configs/zero_shot.yaml so the EXISTING, unmodified
+# src/analysis/zero_shot_grading.py evaluates the harmonised model with no code
+# changes. Design C1: OLIVES is fed RAW (near-IR) at eval time — the eval reuses
+# build_train_transform / build_val_transform from the checkpoint's own config,
+# neither of which harmonises OLIVES, so this is correct as-is.
+#
+# The ONLY differences from zero_shot.yaml:
+#   * checkpoint  -> the NEW harmonised checkpoint (never phase2_coral_on_best.pt)
+#   * features/report/figures dirs -> greyscale_experiment/ so the existing
+#     OLIVES predictions, report, and figures are NOT overwritten
+#     (zero_shot_grading.py writes fixed filenames tta_olives.pt /
+#      olives_dr_predictions.csv / phase4a_*, so isolation is via the dirs).
+
+checkpoint: /content/drive/MyDrive/dissertation/greyscale_experiment/phase2_greenhistmatch_best.pt
+features_dir: /content/drive/MyDrive/dissertation/greyscale_experiment/features
+report_dir:  /content/drive/MyDrive/dissertation/greyscale_experiment/reports
+figures_dir: /content/drive/MyDrive/dissertation/greyscale_experiment/figures
+
+tta:
+  n_passes: 30
+  augmentation: full
+  batch_size: 64
+  include_clean_pass: true
+
+# Read-only Phase 3a EyePACS TTA cache, reused as the confidence-comparison
+# baseline (not written to, not overwritten).
+eyepacs_tta_cache: /content/drive/MyDrive/dissertation/features/tta_eyepacs_test.pt
+seed: 42
