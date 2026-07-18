@@ -266,7 +266,7 @@ def analyse_model(
         conf = _grade2_confusion(grade, label)
         per_biomarker[str(col)] = {
             "name": BIOMARKER_NAMES[col], "column": col,
-            "primary": col in PRIMARY_COLS,
+            "is_primary": col in PRIMARY_COLS,
             "positive_rate": float((label).mean()),
             **auc, **ops, "grade2": conf,
         }
@@ -451,49 +451,86 @@ def fig_confusion(harm: dict[str, Any], orig: dict[str, Any], figures_dir: Path)
 
 
 # ---------------------------------------------------------------------- verdict
-def decide_verdict(harm: dict[str, Any]) -> dict[str, Any]:
-    """categorical-recovered / aggregate-only / categorical-fails."""
+def _patient_significant(patient: dict[str, Any]) -> bool:
+    """Within patient-eye predictions significantly more consistent than chance."""
+    p = patient.get("p_more_consistent_than_chance")
+    ratio = patient.get("variance_ratio_obs_over_shuffled")
+    return bool(p is not None and p < 0.05 and ratio is not None and ratio < 1.0)
+
+
+def decide_verdict(harm: dict[str, Any], patient: dict[str, Any]) -> dict[str, Any]:
+    """categorical-recovered / aggregate-only / categorical-fails (per Prompt 4 spec).
+
+    Recovery requires ALL FOUR primary DR-relevant biomarkers (cols 1, 3, 10, 12) at
+    AUC > 0.65 with CI excluding 0.5, the *balanced* ``moderate_severe`` DME composite
+    detected at grade>=2 with sensitivity > 0.60 (NOT the 91%-imbalanced ``any_dme``),
+    AND within patient-eye predictions significantly more consistent than chance.
+    """
+    n_primary = len(PRIMARY_COLS)
     prim = [harm["per_biomarker"][str(c)] for c in PRIMARY_COLS]
     prim_auc = [p["auc"] for p in prim if p["auc"] is not None]
     prim_strong = [p for p in prim
                    if p["auc"] is not None and p["auc"] > 0.65 and p["ci_excludes_half"]]
-    dme = harm["composites"]["any_dme"]["grade2"]
-    dme_sens = dme["sens_grade_ge2"]
-
     n_strong = len(prim_strong)
     median_prim = float(np.median(prim_auc)) if prim_auc else None
 
-    if n_strong >= 2 and dme_sens is not None and dme_sens > 0.60:
+    # Decision uses the balanced moderate_severe composite, not the 91%-positive any_dme.
+    modsev = harm["composites"]["moderate_severe"]["grade2"]
+    modsev_sens = modsev["sens_grade_ge2"]
+    modsev_spec = modsev["spec_grade_ge2"]
+    anydme = harm["composites"]["any_dme"]["grade2"]
+
+    all_primary_strong = n_strong == n_primary
+    modsev_ok = modsev_sens is not None and modsev_sens > 0.60
+    patient_sig = _patient_significant(patient)
+
+    if all_primary_strong and modsev_ok and patient_sig:
         label = "categorical-recovered"
         prose = (
-            "Primary biomarkers show harmonised AUC > 0.65 with CIs excluding 0.5, "
-            "and grade≥2 detects >60% of the DME composite. Individual pathology "
-            "detection generalises across the colour→near-IR modality gap — a strong "
-            "categorical result. Still indirect (no ground-truth grade on OLIVES)."
+            f"All {n_primary} primary DR-relevant biomarkers (EZ disruption, IR "
+            f"hemorrhages, DRT/ME, SRF) reach AUC > 0.65 with bootstrap CIs excluding "
+            f"0.5 (median primary AUC {_fmt(median_prim, 3)}); the balanced "
+            f"moderate–severe DME composite (DRT/ME ∨ SRF) is detected at grade≥2 with "
+            f"sensitivity {_fmt(modsev_sens, 3)} (specificity {_fmt(modsev_spec, 3)}); "
+            f"and within patient-eye predictions are significantly more consistent than "
+            f"chance (variance ratio "
+            f"{_fmt(patient.get('variance_ratio_obs_over_shuffled'), 3)}, "
+            f"p = {_fmt(patient.get('p_more_consistent_than_chance'), 3)}). Individual "
+            f"pathology detection generalises across the colour→near-IR modality gap. "
+            f"OLIVES has no ground-truth DR grade, so this is strong INDIRECT evidence, "
+            f"not proof."
         )
-    elif median_prim is not None and median_prim >= 0.55 and n_strong <= 1:
+    elif median_prim is not None and median_prim >= 0.55:
         label = "aggregate-only"
         prose = (
-            "Per-biomarker AUCs sit mostly in the 0.55–0.65 band with wide CIs, "
-            "while continuous concordance (Prompt 3) was strong. The model detects "
-            "that SOME pathology is present but does not reliably identify specific "
-            "pathology types — consistent with the 'grade 0 vs everything else' "
-            "structure. The continuous signal rides largely on biomarker COUNT."
+            f"Per-biomarker AUCs sit mostly in the 0.55–0.65 band (median primary AUC "
+            f"{_fmt(median_prim, 3)}, {n_strong}/{n_primary} primaries strong) while "
+            f"continuous concordance (Prompt 3) was strong. The model detects that SOME "
+            f"pathology is present but does not fully identify specific pathology types "
+            f"— consistent with the 'grade 0 vs everything else' structure; the "
+            f"continuous signal rides substantially on biomarker COUNT."
         )
     else:
         label = "categorical-fails"
         prose = (
-            "Per-biomarker AUCs are mostly ≤ 0.55 with CIs including 0.5: the "
-            "predicted grade does not detect individual pathologies. The Prompt-3 "
-            "continuous concordance reflected aggregate correlation with biomarker "
-            "burden, not specific pathology detection."
+            f"Per-biomarker AUCs are mostly ≤ 0.55 with CIs including 0.5 (median "
+            f"primary AUC {_fmt(median_prim, 3)}): the predicted grade does not detect "
+            f"individual pathologies. The Prompt-3 continuous concordance reflected "
+            f"aggregate correlation with biomarker burden, not specific pathology "
+            f"detection."
         )
     return {
         "label": label, "prose": prose,
         "n_primary_strong": n_strong,
+        "n_primary": n_primary,
+        "all_primary_strong": all_primary_strong,
         "primary_median_auc": median_prim,
-        "dme_composite_grade2_sensitivity": dme_sens,
-        "dme_composite_grade2_specificity": dme["spec_grade_ge2"],
+        "decision_composite": "moderate_severe",
+        "moderate_severe_grade2_sensitivity": modsev_sens,
+        "moderate_severe_grade2_specificity": modsev_spec,
+        "any_dme_grade2_sensitivity": anydme["sens_grade_ge2"],
+        "any_dme_grade2_specificity": anydme["spec_grade_ge2"],
+        "patient_agreement_significant": patient_sig,
     }
 
 
@@ -594,14 +631,18 @@ def build_report(
         lines.append(f"_{patient.get('note', 'no multi-visit tier-2 eyes')}._")
     lines.append("")
 
-    dme = harm["composites"]["any_dme"]["grade2"]
+    modsev = harm["composites"]["moderate_severe"]["grade2"]
+    anydme = harm["composites"]["any_dme"]["grade2"]
     lines.append("## Clinically-interpretable claim")
     lines.append("")
     lines.append(
         f"Screening the harmonised model at **grade ≥ 2** detects "
-        f"**{_fmt((dme['sens_grade_ge2'] or 0) * 100, 0)}%** of DME-composite-positive eyes "
-        f"at **{_fmt((dme['spec_grade_ge2'] or 0) * 100, 0)}%** specificity "
-        f"(PPV {_fmt(dme['ppv'], 2)}, NPV {_fmt(dme['npv'], 2)})."
+        f"**{_fmt((modsev['sens_grade_ge2'] or 0) * 100, 0)}%** of moderate–severe DME "
+        f"(DRT/ME ∨ SRF) eyes at **{_fmt((modsev['spec_grade_ge2'] or 0) * 100, 0)}%** "
+        f"specificity (PPV {_fmt(modsev['ppv'], 2)}, NPV {_fmt(modsev['npv'], 2)}). "
+        f"The broader any-DME composite is ~91% positive (near-saturated by IRF), so its "
+        f"specificity ({_fmt((anydme['spec_grade_ge2'] or 0) * 100, 0)}%) is "
+        f"uninformative — the moderate–severe composite is the honest operating point."
     )
     lines.append("")
     lines.append("## Framing (honest)")
@@ -611,8 +652,8 @@ def build_report(
         "and imbalanced biomarkers (IRF 90.6%, vitreous debris 85.4%) carry little "
         "discriminative headroom. OLIVES has no ground-truth DR grade; positive "
         "categorical detection here is strong indirect evidence, not proof. The "
-        "verdict rests on the primary-biomarker AUCs and the DME grade≥2 operating "
-        "point above, not on the continuous concordance alone."
+        "verdict rests on the primary-biomarker AUCs and the moderate–severe DME "
+        "grade≥2 operating point above, not on the continuous concordance alone."
     )
     lines.append("")
     return "\n".join(lines)
@@ -652,7 +693,7 @@ def run(cfg: DictConfig, args: argparse.Namespace) -> dict[str, Any]:
     fig_confusion(harm, orig, fd)
 
     print("[6/6] verdict + writing JSON + report")
-    verdict = decide_verdict(harm)
+    verdict = decide_verdict(harm, patient)
     out = _jsonable({
         "step1_introspection": facts,
         "config": {"seed": seed, "bootstrap_n": n_boot,
@@ -670,10 +711,12 @@ def run(cfg: DictConfig, args: argparse.Namespace) -> dict[str, Any]:
     )
     print(f"[done] wrote {paths['out_json']}")
     print(f"[done] wrote {paths['out_report']}")
-    dme = harm["composites"]["any_dme"]["grade2"]
+    modsev = harm["composites"]["moderate_severe"]["grade2"]
     print(f"[done] VERDICT = {verdict['label']} | primary strong AUCs = "
-          f"{verdict['n_primary_strong']}/4 | DME grade≥2 sens = "
-          f"{_fmt(dme['sens_grade_ge2'], 3)}, spec = {_fmt(dme['spec_grade_ge2'], 3)}")
+          f"{verdict['n_primary_strong']}/{verdict['n_primary']} | "
+          f"moderate-severe DME grade≥2 sens = {_fmt(modsev['sens_grade_ge2'], 3)}, "
+          f"spec = {_fmt(modsev['spec_grade_ge2'], 3)} | patient-consistent = "
+          f"{verdict['patient_agreement_significant']}")
     return out
 
 
