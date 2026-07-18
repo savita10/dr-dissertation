@@ -101,7 +101,7 @@ def compute_reference_histogram(
 def _save(reference: dict, out_path: str | Path) -> None:
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".npy.tmp")
+    tmp = out.with_suffix(".tmp.npy")
     np.save(tmp, reference, allow_pickle=True)
     tmp.replace(out)
     print(f"[hist] wrote reference histogram -> {out}")
