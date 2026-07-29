@@ -40,3 +40,6 @@ Thumbs.db
 
 # Generated document formats
 docs/*.docx
+
+.claude/
+.claude/
