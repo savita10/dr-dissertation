@@ -141,6 +141,7 @@ Run these in order. Later phases consume the feature outputs of earlier phases, 
 !cd /content/dr-dissertation && python -m scripts.compute_olives_histogram --config configs/greyscale_train.yaml
 !cd /content/dr-dissertation && python -m src.analysis.zero_shot_grading --config configs/greyscale_eval.yaml
 !cd /content/dr-dissertation && python -m src.analysis.greyscale_concordance --config configs/greyscale_eval.yaml
+!cd /content/dr-dissertation && python -m src.analysis.greyscale_categorical_concordance --config configs/greyscale_eval.yaml
 ```
 
 **Training is not required** to reproduce the results, because the trained checkpoints are supplied. See the optional training section below if you wish to train the models yourself.
