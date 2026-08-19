@@ -35,7 +35,7 @@ The trained checkpoints and preprocessed data are too large for GitHub and are h
 
 The shared folder mirrors the `dissertation/` working directory. The files that matter for reproduction are:
 
-- `checkpoints/phase2_coral_on_best.pt` — **the main model** (colour). Used for all Phase 1–4 results. (Ignore the `coral_off`, `smoke`, `last`, and `checkpoints_FINAL_BACKUP` variants — they are not needed.)
+- `checkpoints/phase2_coral_on_best.pt` — **the main model** (colour). Used for all Phase 1–4 results. (Ignore the `coral_off`, `smoke`, and `last` variants — they are not needed.)
 - `greyscale_experiment/phase2_greenhistmatch_best.pt` — **the harmonisation model**. Used for the Section 6.5 recovery results.
 - `preprocessed/eyepacs/` — EyePACS preprocessed tensors (8 shards + metadata).
 - `preprocessed/olives/` — OLIVES preprocessed tensor + metadata.
