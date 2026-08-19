@@ -8,7 +8,7 @@ between dataloader construction and training via
 ``harmonise_eyepacs_in_bundle``. OLIVES is left raw (Design C1).
 
 Nothing in ``src/`` is modified; this is a NEW wrapper on the
-``greyscale-experiment`` branch. The best checkpoint (by validation DR QWK) is
+``greyscale-experiment``. The best checkpoint (by validation DR QWK) is
 written by ``Trainer`` to ``cfg.checkpoint.dir / phase2_{run_name}_best.pt`` —
 i.e. ``greyscale_experiment/phase2_greenhistmatch_best.pt`` — never the original
 ``phase2_coral_on_best.pt``.
