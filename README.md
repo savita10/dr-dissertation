@@ -31,7 +31,7 @@ Both datasets are publicly available.
 
 The trained checkpoints and preprocessed data are too large for GitHub and are hosted on Google Drive.
 
-**Shared Drive folder:** `<INSERT YOUR SHARED GOOGLE DRIVE LINK HERE>`
+**Shared Drive folder:** `https://drive.google.com/drive/folders/1xZH8GxuSqSETpxs91cM6OhSytJvSh9MT?usp=drive_link`
 
 The shared folder mirrors the `dissertation/` working directory. The files that matter for reproduction are:
 
@@ -143,10 +143,23 @@ Run these in order. Later phases consume the feature outputs of earlier phases, 
 !cd /content/dr-dissertation && python -m src.analysis.greyscale_concordance --config configs/greyscale_eval.yaml
 ```
 
-**Training is not required** to reproduce the results, because the trained checkpoints are supplied. To retrain the main model from scratch (several hours on GPU):
+**Training is not required** to reproduce the results, because the trained checkpoints are supplied. See the optional training section below if you wish to train the models yourself.
+
+### Optional — train the models from scratch
+
+The supplied checkpoints reproduce the reported results exactly. If you instead wish to train the models yourself, first complete the Path B raw-data setup and preprocessing (Section 7), then run:
+
 ```python
+# Main model (colour) — writes a checkpoint to checkpoints/
 !cd /content/dr-dissertation && python -m src.training.train --config configs/train.yaml
+
+# Harmonised model (green-channel histogram-matched) — writes to greyscale_experiment/
+!cd /content/dr-dissertation && python -m scripts.train_greyscale --config configs/greyscale_train.yaml
 ```
+
+Each run reports its best validation DR quadratic weighted kappa at the end (the main model is approximately 0.615). Training the main model takes several hours on GPU.
+
+**Important:** a retrained model will not be bit-identical to the supplied checkpoint, because training involves randomness (weight initialisation, data ordering, and GPU-level non-determinism). Results from a retrained model will therefore be close to, but may differ slightly from, the values in the expected-results table. To reproduce the reported numbers exactly, use the supplied checkpoints (Paths A or B).
 
 ## 9. Expected results (verification table)
 
