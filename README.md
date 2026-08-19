@@ -31,11 +31,11 @@ Both datasets are publicly available.
 
 The trained checkpoints and preprocessed data are too large for GitHub and are hosted on Google Drive.
 
-**Shared Drive folder:** https://drive.google.com/drive/folders/1xZH8GxuSqSETpxs91cM6OhSytJvSh9MT?usp=drive_link 
+**Shared Drive folder:** `<INSERT YOUR SHARED GOOGLE DRIVE LINK HERE>`
 
 The shared folder mirrors the `dissertation/` working directory. The files that matter for reproduction are:
 
-- `checkpoints/phase2_coral_on_best.pt` — **the main model** (colour). Used for all Phase 1–4 results. (Ignore the `coral_off`, `smoke`, and `last` variants — they are not needed.)
+- `checkpoints/phase2_coral_on_best.pt` — **the main model** (colour). Used for all Phase 1–4 results. (Ignore the `coral_off`, `smoke`, `last`, and `checkpoints_FINAL_BACKUP` variants — they are not needed.)
 - `greyscale_experiment/phase2_greenhistmatch_best.pt` — **the harmonisation model**. Used for the Section 6.5 recovery results.
 - `preprocessed/eyepacs/` — EyePACS preprocessed tensors (8 shards + metadata).
 - `preprocessed/olives/` — OLIVES preprocessed tensor + metadata.
@@ -87,10 +87,15 @@ For **Path B** you additionally need the raw data in place (see Section 7).
    REPO_DIR = "/content/dr-dissertation"
    if not os.path.exists(REPO_DIR):
        !git clone https://github.com/savita10/dr-dissertation.git {REPO_DIR}
-   %cd /content/dr-dissertation
-   import sys; sys.path.insert(0, '/content/dr-dissertation')
-   !pip install -r requirements.txt -q
+   else:
+       !git -C {REPO_DIR} fetch origin && git -C {REPO_DIR} reset --hard origin/main
+   !cd /content/dr-dissertation && pip install -r requirements.txt -q
+   import torch
+   print(f"CUDA available: {torch.cuda.is_available()}")
+   if torch.cuda.is_available():
+       print(f"GPU: {torch.cuda.get_device_name(0)}")
    ```
+   Every command below is prefixed with `cd /content/dr-dissertation &&` so it runs from the repository root; this is required for the `src` and `scripts` modules to be found.
 3. Confirm the Drive folder structure of Section 5 is in place on your Drive.
 
 ## 7. Path B only — raw data download and preprocessing
@@ -107,7 +112,7 @@ Skip this section entirely if you are using the preprocessed tensors (Path A).
 
 **Run preprocessing** (regenerates the tensors into `preprocessed/`):
 ```python
-!python -m src.data.preprocess --config configs/preprocess.yaml
+!cd /content/dr-dissertation && python -m src.data.preprocess --config configs/preprocess.yaml
 ```
 
 ## 8. Evaluation pipeline
@@ -116,31 +121,31 @@ Run these in order. Later phases consume the feature outputs of earlier phases, 
 
 ```python
 # Phase 1 — distributional diagnostics between the two modalities
-!python -m src.analysis.feature_extraction --dataset eyepacs --config configs/preprocess.yaml
-!python -m src.analysis.feature_extraction --dataset olives  --config configs/preprocess.yaml
-!python -m src.analysis.distribution_diagnostics --config configs/preprocess.yaml
+!cd /content/dr-dissertation && python -m src.analysis.feature_extraction --dataset eyepacs --config configs/preprocess.yaml
+!cd /content/dr-dissertation && python -m src.analysis.feature_extraction --dataset olives --config configs/preprocess.yaml
+!cd /content/dr-dissertation && python -m src.analysis.distribution_diagnostics --config configs/preprocess.yaml
 
 # Phase 2 — alignment diagnostics (post-training gap, CORAL ablation)
-!python -m src.analysis.phase2_diagnostics --config configs/diagnostics.yaml
+!cd /content/dr-dissertation && python -m src.analysis.phase2_diagnostics --config configs/diagnostics.yaml
 
 # Phase 3a — EyePACS calibration and test-time-augmentation uncertainty
-!python -m src.analysis.calibration_eyepacs --config configs/uncertainty.yaml
+!cd /content/dr-dissertation && python -m src.analysis.calibration_eyepacs --config configs/uncertainty.yaml
 
 # Phase 4 — cross-modality transfer and in-domain evaluation
-!python -m src.analysis.zero_shot_grading --config configs/zero_shot.yaml
-!python -m src.analysis.dr_failure_characterisation --config configs/zero_shot.yaml
-!python -m src.analysis.indomain_evaluation --config configs/indomain_eval.yaml
-!python -m src.analysis.phase4_report --config configs/zero_shot.yaml
+!cd /content/dr-dissertation && python -m src.analysis.zero_shot_grading --config configs/zero_shot.yaml
+!cd /content/dr-dissertation && python -m src.analysis.dr_failure_characterisation --config configs/zero_shot.yaml
+!cd /content/dr-dissertation && python -m src.analysis.indomain_evaluation --config configs/indomain_eval.yaml
+!cd /content/dr-dissertation && python -m src.analysis.phase4_report --config configs/zero_shot.yaml
 
 # Greyscale harmonisation experiment (evaluation only — uses the supplied harmonised checkpoint)
-!python -m scripts.compute_olives_histogram --config configs/greyscale_train.yaml
-!python -m src.analysis.zero_shot_grading --config configs/greyscale_eval.yaml
-!python -m src.analysis.greyscale_concordance --config configs/greyscale_eval.yaml
+!cd /content/dr-dissertation && python -m scripts.compute_olives_histogram --config configs/greyscale_train.yaml
+!cd /content/dr-dissertation && python -m src.analysis.zero_shot_grading --config configs/greyscale_eval.yaml
+!cd /content/dr-dissertation && python -m src.analysis.greyscale_concordance --config configs/greyscale_eval.yaml
 ```
 
 **Training is not required** to reproduce the results, because the trained checkpoints are supplied. To retrain the main model from scratch (several hours on GPU):
 ```python
-!python -m src.training.train --config configs/train.yaml
+!cd /content/dr-dissertation && python -m src.training.train --config configs/train.yaml
 ```
 
 ## 9. Expected results (verification table)
@@ -199,7 +204,18 @@ If your run is correct, the values below should match. The **source file** colum
 
 The OLIVES split is patient-aware with a fixed seed (42), so the held-out test split is deterministic and should match exactly. Values are reported to the precision at which they appear in the source files; differences beyond the last decimal place may indicate a configuration or data-placement issue.
 
-## 10. Repository structure
+## 10. Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'src'` (or `scripts`) | The command is not running from the repository root. Ensure every command is prefixed with `cd /content/dr-dissertation &&` as shown in Section 8. |
+| `FileNotFoundError` for a checkpoint or tensor | A file is missing from the expected Drive path. Confirm the folder structure in Section 5 is recreated on your Drive and the shared files are placed correctly. |
+| A later phase fails on a missing feature file (e.g. `tta_eyepacs_test.pt`) | The phases were run out of order. Run them in the sequence given in Section 8; later phases consume earlier phases' outputs. |
+| A script logs "cuda unavailable, falling back to cpu" | No GPU attached. Set Runtime, then Change runtime type, then GPU, and re-run. |
+| The clone fails or asks for credentials | The repository is public, so no token is needed. Use the plain clone URL in Section 6; if you cloned earlier while it was private, delete the runtime and start a fresh session. |
+| Paths point to a different Drive layout | The configuration files use absolute `MyDrive/dissertation/...` paths. Recreate the Section 5 structure on your own Drive, or edit the paths in `configs/*.yaml`. |
+
+## 11. Repository structure
 
 ```
 src/
@@ -212,11 +228,11 @@ scripts/         greyscale reference-histogram computation
 notebooks/       Colab notebooks that orchestrate each phase
 ```
 
-## 11. Requirements
+## 12. Requirements
 
 Python 3, PyTorch 2.x with torchvision (no TensorFlow), plus numpy, scikit-image, scikit-learn, pandas, matplotlib, tqdm, omegaconf, and the Hugging Face `datasets` library. Install with `pip install -r requirements.txt`. A GPU runtime is required for training and for the evaluation forward passes.
 
-## 12. Notes for evaluators
+## 13. Notes for evaluators
 
 - All results are produced by the Section 8 commands from the supplied frozen checkpoints; no retraining is required.
 - The configuration files use absolute `MyDrive/dissertation/...` paths. Recreating the folder structure of Section 5 on your own Drive is the simplest way to make them resolve; otherwise edit the paths in `configs/*.yaml`.
