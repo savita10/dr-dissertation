@@ -1,132 +1,224 @@
-# Diabetic Retinopathy Progression Prediction
+# Cross-Modality Diabetic Retinopathy Assessment
 
-A deep learning framework for predicting diabetic retinopathy progression by jointly encoding the EyePACS and OLIVES fundus image datasets in a shared latent space. The project combines cross-dataset contrastive alignment with multi-task supervision (DR severity classification, biomarker detection, and continuous clinical outcome regression) to enable knowledge transfer between two datasets with structurally different label availability.
+**Transfer Failure, In-Domain Structural Prediction, and Recovery by Input Harmonisation**
 
-**Institution**: University of Bath, MSc dissertation
-**Status**: Phase 1 (distributional validation) complete; Phase 2 (model development) in progress
+MSc Dissertation, University of Bath.
 
-## Project Structure
+**GitHub repository:** https://github.com/savita10/dr-dissertation
 
-```
-dr-dissertation/
-├── src/
-│   ├── data/         # Preprocessing, dataset classes, dataloaders, samplers, transforms
-│   ├── analysis/     # ResNet-50 feature extraction and distributional diagnostics
-│   ├── models/       # Shared encoder, output heads, model wrapper, loss functions
-│   ├── training/     # Training loop and entry-point scripts
-│   └── utils/        # Config loading, Colab setup, zip inspection helpers
-├── configs/          # YAML configuration files (paths, preprocessing, model, training)
-├── notebooks/        # Colab notebook orchestrators (numbered by execution order)
-├── docs/             # Methodology, phase documentation, results
-└── requirements.txt
-```
+This repository contains the complete code to reproduce the results of a study on cross-modality transfer of deep learning for diabetic retinopathy (DR) assessment, from colour fundus photography (EyePACS) to near-infrared reflectance imaging acquired by confocal scanning laser ophthalmoscopy (OLIVES).
 
-## Documentation
+---
 
-The `docs/` folder contains the full methodological documentation:
+## 1. Study overview
 
-| Document | Description |
-|---|---|
-| `METHODOLOGY.md` | Full project methodology across all four phases, with Phase 1 findings integrated |
-| `PREPROCESSING_DOCUMENTATION.md` | Data structure reference: three-tier label structure, schema of saved `.pt` files, preprocessing bug fixes |
-| `PHASE1_SUMMARY.md` | Retrospective summary of Phase 1 — objectives, diagnostics, findings, design decisions |
-| `PHASE2_KICKOFF.md` | Phase 2 implementation plan (model architecture, losses, training pipeline) |
-| `POST_TRAINING_REFERENCE.md` | Reference guide for Phase 3 (uncertainty) and Phase 4 (evaluation) |
+A multi-task model is trained on colour fundus images and evaluated across the modality gap to near-infrared images. The study establishes three findings:
 
-## Phases
+1. **Zero-shot cross-modality DR grading fails, and fails confidently.** Applied to near-infrared OLIVES images, the colour-trained grader collapses to the majority class (96.1% predicted no-DR), and its predictive uncertainty does not flag the failure.
+2. **In-domain structural prediction succeeds; functional prediction does not.** From near-infrared images the model recovers retinal fluid biomarkers (AUROC 0.90–0.96) and, more weakly, central subfield thickness, but not visual acuity.
+3. **The grading collapse is partly recoverable by input harmonisation.** Green-channel extraction with histogram matching to the target intensity distribution recovers substantial, clinically-validated grading signal, at a cost of 0.02 in in-domain validation quadratic weighted kappa.
 
-The project proceeds in four phases:
+## 2. Datasets
 
-**Phase 1 — Distributional validation** (complete)
-Quantify and mechanistically diagnose the cross-dataset gap between EyePACS and OLIVES in ResNet-50 feature space. Six diagnostics (FID, MMD, k-NN cosine similarity, PCA, PCA stratified by DR severity, image stats correlation) characterise the gap as substantial (FID 240.65) but acquisition-driven rather than pathology-driven (PC1 tracks field-stop geometry with Spearman ρ = -0.27, p < 10⁻³⁵; DR severity classes intermix on PC1 with 16× ratio relative to dataset centroid distance). This mechanism-level finding supports cross-dataset contrastive alignment as a principled architectural choice.
+Both datasets are publicly available.
 
-**Phase 2 — Model development** (in progress)
-Shared encoder (ResNet-50, ImageNet-pretrained, fine-tuned) with three output heads (DR severity softmax, biomarker BCE, BCVA/CST regression) and four training loss terms (cross-entropy, masked BCE, masked MSE, supervised contrastive). Mask-based loss formulation handles the three-tier label structure (OLIVES tier-0: 49.2% unlabelled, tier-1: 44.7% clinical labels only, tier-2: 6.0% full biomarker labels).
+| Dataset | Modality | Source / link |
+|---|---|---|
+| EyePACS | Colour fundus, DR-graded 0–4 | Hugging Face: https://huggingface.co/datasets/bumbledeep/eyepacs (originally the Kaggle Diabetic Retinopathy Detection competition) |
+| OLIVES | Near-infrared fundus + OCT-derived clinical labels and biomarkers | Zenodo DOI 10.5281/zenodo.7105232 — https://doi.org/10.5281/zenodo.7105232 (see also https://github.com/olivesgatech/OLIVES_Dataset) |
 
-**Phase 3 — Uncertainty quantification** (pending)
-Monte Carlo Dropout-based confidence estimation, with calibration analysis (reliability diagrams, ECE) and risk-stratification curves.
+## 3. Shared data (checkpoints, tensors, labels)
 
-**Phase 4 — Evaluation** (pending)
-Standard performance metrics on held-out test set, longitudinal trajectory prediction (the dissertation's key scientific claim: distinguishing same-baseline patients with different future BCVA/CST trajectories), and cross-dataset transfer validation.
+The trained checkpoints and preprocessed data are too large for GitHub and are hosted on Google Drive.
 
-## Data
+**Shared Drive folder:** https://drive.google.com/drive/folders/1xZH8GxuSqSETpxs91cM6OhSytJvSh9MT?usp=drive_link 
 
-### EyePACS
+The shared folder mirrors the `dissertation/` working directory. The files that matter for reproduction are:
 
-- **Source**: HuggingFace dataset [`bumbledeep/eyepacs`](https://huggingface.co/datasets/bumbledeep/eyepacs) (MIT licence).
-- **Format**: HuggingFace Arrow format, saved locally to Google Drive at `configs/paths.yaml :: eyepacs_hf_dir`.
-- **Size**: 35,108 rows, single `train` split.
-- **Columns**: `image` (PIL), `label_code` (int, 0–4), `label` (string).
-- **Classes**: `no_diabetic_retinopathy`, `mild`, `moderate`, `severe`, `proliferative_diabetic_retinopathy`.
-- The legacy `EYEPACS.zip` path is retained in `paths.yaml` (`eyepacs_zip`) for reference only; all loaders use the HuggingFace version via `load_from_disk`.
+- `checkpoints/phase2_coral_on_best.pt` — **the main model** (colour). Used for all Phase 1–4 results. (Ignore the `coral_off`, `smoke`, and `last` variants — they are not needed.)
+- `greyscale_experiment/phase2_greenhistmatch_best.pt` — **the harmonisation model**. Used for the Section 6.5 recovery results.
+- `preprocessed/eyepacs/` — EyePACS preprocessed tensors (8 shards + metadata).
+- `preprocessed/olives/` — OLIVES preprocessed tensor + metadata.
+- `preprocessed/regression_stats.json` — BCVA/CST normalisation statistics.
+- `greyscale_experiment/olives_reference_hist.npy` — the harmonisation reference histogram.
 
-### OLIVES
+## 4. Two ways to reproduce the results
 
-- **Source**: `olive.zip` on Google Drive — a wrapper containing `OLIVES.zip`, which in turn contains the two trial archives `TREX_DME.zip` and `Prime_FULL.zip`. Labels are already extracted to `configs/paths.yaml :: olives_labels_dir`.
-- **Modalities**: fundus (`.tif` / `.png`), OCT (`.tif` / `.png`), and clinical/biomarker metadata. This project uses fundus images only as model input; OCT-derived biomarkers serve as supervision targets rather than additional input modalities.
-- **Trial archives**:
-  - `TREX_DME.zip` — 98,897 files. Folder pattern: `TREX DME/GILA/{patient_id}/V{visit}/{eye}/`. Contains 1,849 fundus images (`fundus_OD/OS_V{visit}.tif`), 90,706 OCT scans (`TREXW_000000.tif` …), and 1,045 sequence files (`.npy`).
-  - `Prime_FULL.zip` — 68,807 files. Folder pattern: `Prime_FULL/{patient_id}/W{week}/{eye}/`. Contains 2,586 fundus images (`fundus_OD/OS_W{week}`), 65,375 OCT scans (`0.png`, `1.png` …), and 738 sequence files (`.npy`).
-  - **Total fundus images**: ~4,435 across both trials. Fundus images are identifiable by `fundus` in the filename.
-- **Labels CSV**: `OLIVES_Dataset_Labels/ml_centric_labels/Biomarker_Clinical_Data_Images.csv` — 9,408 rows × 22 columns. Key columns: `Path` (links to image, matches the zip folder structure), `Patient_ID`, `Eye_ID`, `BCVA`, `CST`, plus 16 binary biomarker columns.
-- **Final cohort after preprocessing**: 3,142 unique fundus images from 96 patients (204 patient-eyes) across the two trials, with mean 15.4 visits per eye. Matches the cohort reported in Prabhushankar et al., NeurIPS 2022. See `docs/PREPROCESSING_DOCUMENTATION.md` for the bug fixes that recovered this match.
+**Path A — Use the preprocessed tensors (recommended, faster).**
+Download the checkpoints and the `preprocessed/` tensors from the shared folder, place them on your own Drive, and run the evaluation directly. This skips the multi-step raw-data download and preprocessing.
 
-## Setup and Reproduction
+**Path B — Regenerate everything from the public raw data (full pipeline).**
+Download the public EyePACS and OLIVES datasets, run the preprocessing step to regenerate the tensors, then run the evaluation. Choose this if you wish to verify the preprocessing as well. Note the raw-data setup is more involved (see Section 7).
 
-### Prerequisites
+Both paths run the **same evaluation commands** (Section 8). The only difference is whether you download the tensors (Path A) or regenerate them (Path B).
 
-- Google Colab with GPU runtime (T4 minimum, A100 preferred for Phase 2)
-- Google Drive with at least 25 GB free space for preprocessed tensors
-- GitHub personal access token with repository read access, stored in Colab Secrets as `GITHUB_TOKEN`
-- Both source datasets (EyePACS HuggingFace dataset and `olive.zip`) downloaded to Google Drive
+## 5. Required Google Drive folder structure
 
-### Local development
-
-```bash
-pip install -r requirements.txt
-```
-
-### Reproduction sequence
-
-Notebooks are numbered by execution order and located in `notebooks/`. Each notebook is self-contained — it clones the repo, mounts Drive, and runs the relevant code modules from `src/`.
-
-1. **`00_setup_test.ipynb`** — verifies the Colab environment, clones the repo, mounts Drive, prints loaded paths. Run once at the start of any new Colab session.
-2. **`01_inspect_data.ipynb`** — non-destructive inspection of the three source zip archives. Reports sizes, file counts, and per-archive layout. No data is extracted.
-3. **`01b_inspect_olives.ipynb`** — deeper OLIVES-specific inspection. Loads the biomarker labels CSV, scans the nested zip structure, and (optionally, after explicit confirmation) extracts ~4,435 fundus images.
-4. **`02_preprocess.ipynb`** — preprocesses both datasets into normalised 224×224 PyTorch tensors saved to Drive. Resumable: existing shards are skipped per-shard, and the OLIVES output is skipped entirely if its `.pt` file already exists.
-5. **`03_phase1_distributional_validation.ipynb`** — runs the six Phase 1 diagnostics on ResNet-50 features extracted from both datasets. Produces `phase1_report.md` and three plots saved to Drive at `dissertation/results/phase1/`.
-6. **`04_phase2_training.ipynb`** *(in progress)* — Phase 2 model training pipeline.
-
-### Configuration
-
-All paths and parameters live in YAML files under `configs/`. The primary config files are:
-
-- `configs/paths.yaml` — dataset and output locations on Drive
-- `configs/preprocess.yaml` — preprocessing parameters (image size, normalisation, shard size)
-- `configs/model.yaml` — model architecture hyperparameters *(Phase 2)*
-- `configs/train.yaml` — training hyperparameters *(Phase 2)*
-
-## Citation
-
-If you reference this work, please cite:
+The configuration files use absolute Drive paths of the form `/content/drive/MyDrive/dissertation/...`. When you mount your own Google Drive in Colab, `MyDrive` refers to **your** Drive, so recreate this structure on your own Drive and the paths will resolve without editing any config. If you place files elsewhere, edit the corresponding paths in `configs/*.yaml`.
 
 ```
-Nair, Savita. (2026). Cross-Dataset Contrastive Alignment and Adaptive Multimodal Fusion for Diabetic Retinopathy Progression Prediction with Missing Modality Handling.
-MSc dissertation, University of Bath.
+MyDrive/
+└── dissertation/
+    ├── checkpoints/
+    │   └── phase2_coral_on_best.pt
+    ├── greyscale_experiment/
+    │   ├── phase2_greenhistmatch_best.pt
+    │   └── olives_reference_hist.npy
+    ├── preprocessed/
+    │   ├── eyepacs/                     (8 tensor shards + metadata.json)
+    │   ├── olives/                      (olives_fundus.pt + metadata.json)
+    │   └── regression_stats.json
+    ├── features/                        (created by the pipeline)
+    ├── reports/                         (created by the pipeline)
+    ├── results/                         (created by the pipeline)
+    └── figures/                         (created by the pipeline)
 ```
 
-## Acknowledgements
+For **Path B** you additionally need the raw data in place (see Section 7).
 
-I am grateful to Dr Deblina Bhattacharjee for their guidance throughout this dissertation.
+## 6. Setup (both paths)
 
-Datasets used in this project are publicly available under their respective licences:
+1. Open the project in Google Colab with a **GPU runtime** (Runtime, then Change runtime type, then GPU).
+2. **Clone the repository and mount Drive.** The repository is public, so no credentials are required:
+   ```python
+   from google.colab import drive
+   import os
+   drive.mount('/content/drive')
+   REPO_DIR = "/content/dr-dissertation"
+   if not os.path.exists(REPO_DIR):
+       !git clone https://github.com/savita10/dr-dissertation.git {REPO_DIR}
+   %cd /content/dr-dissertation
+   import sys; sys.path.insert(0, '/content/dr-dissertation')
+   !pip install -r requirements.txt -q
+   ```
+3. Confirm the Drive folder structure of Section 5 is in place on your Drive.
 
-- **EyePACS** via the [`bumbledeep/eyepacs`](https://huggingface.co/datasets/bumbledeep/eyepacs) HuggingFace dataset (MIT licence), originally from the [Kaggle Diabetic Retinopathy Detection competition](https://www.kaggle.com/c/diabetic-retinopathy-detection/)
-- **OLIVES** from Prabhushankar et al. ([NeurIPS 2022](https://alregib.ece.gatech.edu/olives-dataset/)), DOI: [10.5281/zenodo.7105232](https://doi.org/10.5281/zenodo.7105232)
+## 7. Path B only — raw data download and preprocessing
 
-This work is conducted as part of the MSc programme at the University of Bath.
+Skip this section entirely if you are using the preprocessed tensors (Path A).
 
-## Licence
+**Download the raw data to these locations** (paths are set in `configs/preprocess.yaml`; edit them if you use different locations):
 
-Code: MIT Licence (see `LICENSE` file if present in repository, otherwise default to MIT)
-Documentation and analysis: CC-BY 4.0
+- **EyePACS:** download from Hugging Face into `/content/eyepacs_hf` (a runtime-local path; re-downloaded each session).
+- **OLIVES images:** download the archive to `MyDrive/olive.zip`.
+- **OLIVES labels:** download the label files into `MyDrive/olives_labels/OLIVES_Dataset_Labels/`:
+  - `ml_centric_labels/Biomarker_Clinical_Data_Images.csv` (tier-2 biomarker labels)
+  - `full_labels/Clinical_Data_Images.xlsx` (tier-1 clinical labels — **required**; preprocessing fails without it)
+
+**Run preprocessing** (regenerates the tensors into `preprocessed/`):
+```python
+!python -m src.data.preprocess --config configs/preprocess.yaml
+```
+
+## 8. Evaluation pipeline
+
+Run these in order. Later phases consume the feature outputs of earlier phases, so the sequence matters. Each command writes a JSON report, a markdown summary, and figures under `reports/`, `results/`, and `figures/`.
+
+```python
+# Phase 1 — distributional diagnostics between the two modalities
+!python -m src.analysis.feature_extraction --dataset eyepacs --config configs/preprocess.yaml
+!python -m src.analysis.feature_extraction --dataset olives  --config configs/preprocess.yaml
+!python -m src.analysis.distribution_diagnostics --config configs/preprocess.yaml
+
+# Phase 2 — alignment diagnostics (post-training gap, CORAL ablation)
+!python -m src.analysis.phase2_diagnostics --config configs/diagnostics.yaml
+
+# Phase 3a — EyePACS calibration and test-time-augmentation uncertainty
+!python -m src.analysis.calibration_eyepacs --config configs/uncertainty.yaml
+
+# Phase 4 — cross-modality transfer and in-domain evaluation
+!python -m src.analysis.zero_shot_grading --config configs/zero_shot.yaml
+!python -m src.analysis.dr_failure_characterisation --config configs/zero_shot.yaml
+!python -m src.analysis.indomain_evaluation --config configs/indomain_eval.yaml
+!python -m src.analysis.phase4_report --config configs/zero_shot.yaml
+
+# Greyscale harmonisation experiment (evaluation only — uses the supplied harmonised checkpoint)
+!python -m scripts.compute_olives_histogram --config configs/greyscale_train.yaml
+!python -m src.analysis.zero_shot_grading --config configs/greyscale_eval.yaml
+!python -m src.analysis.greyscale_concordance --config configs/greyscale_eval.yaml
+```
+
+**Training is not required** to reproduce the results, because the trained checkpoints are supplied. To retrain the main model from scratch (several hours on GPU):
+```python
+!python -m src.training.train --config configs/train.yaml
+```
+
+## 9. Expected results (verification table)
+
+If your run is correct, the values below should match. The **source file** column gives the output file (written under `reports/` or `greyscale_experiment/`) in which each value appears, so you can locate and check it directly. Small variation in the last decimal place is expected on different hardware.
+
+**Phase 1 — cross-modality distributional gap**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| Pre-alignment gap (FID) | 240.65 | reports/phase2_results.json |
+| Post-alignment gap (FID) | 74.64 | reports/phase2_results.json |
+
+**Phase 2 — in-domain grading**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| In-domain validation QWK | ≈ 0.615 | reports/phase2_results.json |
+
+**Phase 3a — calibration and uncertainty (EyePACS test set)**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| Test accuracy | 0.736 | reports/phase3a_calibration.json |
+| Test QWK | 0.642 | reports/phase3a_calibration.json |
+| Expected calibration error (ECE) | 0.12 | reports/phase3a_calibration.json |
+| Selective accuracy at low coverage | up to ~0.90 | reports/phase3a_calibration.json |
+
+**Phase 4a/4b — zero-shot cross-modality grading (OLIVES) and failure**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| Predicted grade-0 share (collapse) | 96.1% | reports/phase4b_failure.json |
+| Grade-1 / 2 / 3 / 4 shares | 0.5% / 0.4% / 0.8% / 2.2% | reports/phase4b_failure.json |
+| Grade vs central subfield thickness (wrong-direction) | rho = -0.492 | reports/phase4b_failure.json |
+
+**Phase 4c — in-domain evaluation, held-out OLIVES test split (28 biomarker-labelled images)**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| IRF AUROC | 0.958 | reports/phase4c_indomain.json |
+| SRF AUROC | 0.904 | reports/phase4c_indomain.json |
+| Vitreous debris AUROC | 0.875 | reports/phase4c_indomain.json |
+| CST R-squared | 0.198 | reports/phase4c_indomain.json |
+| BCVA R-squared | -0.194 | reports/phase4c_indomain.json |
+
+**Greyscale harmonisation — harmonised model (OLIVES)**
+
+| Metric | Expected | Source file |
+|---|---|---|
+| Predicted grade-0 share (recovered) | 53.2% | greyscale_experiment/greyscale_concordance.json |
+| Grade vs central subfield thickness (correct direction) | rho = +0.332 | greyscale_experiment/greyscale_concordance.json |
+| Primary biomarker AUROC range | 0.685 - 0.764 | greyscale_experiment/greyscale_categorical_concordance.json |
+| Patient-level consistency test | p < 0.001 | greyscale_experiment/greyscale_categorical_concordance.json |
+| In-domain validation QWK cost | 0.615 -> 0.595 (0.02) | greyscale training log |
+
+The OLIVES split is patient-aware with a fixed seed (42), so the held-out test split is deterministic and should match exactly. Values are reported to the precision at which they appear in the source files; differences beyond the last decimal place may indicate a configuration or data-placement issue.
+
+## 10. Repository structure
+
+```
+src/
+  models/        DRModel (ResNet-50 encoder + DR / biomarker / regression heads)
+  training/      training entry point
+  data/          preprocessing
+  analysis/      per-phase evaluation modules
+configs/         YAML configuration (paths are set here)
+scripts/         greyscale reference-histogram computation
+notebooks/       Colab notebooks that orchestrate each phase
+```
+
+## 11. Requirements
+
+Python 3, PyTorch 2.x with torchvision (no TensorFlow), plus numpy, scikit-image, scikit-learn, pandas, matplotlib, tqdm, omegaconf, and the Hugging Face `datasets` library. Install with `pip install -r requirements.txt`. A GPU runtime is required for training and for the evaluation forward passes.
+
+## 12. Notes for evaluators
+
+- All results are produced by the Section 8 commands from the supplied frozen checkpoints; no retraining is required.
+- The configuration files use absolute `MyDrive/dissertation/...` paths. Recreating the folder structure of Section 5 on your own Drive is the simplest way to make them resolve; otherwise edit the paths in `configs/*.yaml`.
+- Run the evaluation phases in the given order, as later phases consume earlier phases' outputs.
+- This is a research study on frozen models. It is not a clinical tool and makes no diagnostic claims about individuals.
